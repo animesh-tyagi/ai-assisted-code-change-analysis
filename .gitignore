@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Java / Maven (parser service, M2)
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test / coverage
+coverage/
+.vitest/
+
+# Local workspaces used by the worker (ARCHITECTURE §4)
+/data/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
