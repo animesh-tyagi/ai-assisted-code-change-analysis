@@ -1,0 +1,51 @@
+# Local development infrastructure: MongoDB (graph + results) and Redis (BullMQ).
+#
+# Two deliberate choices, recorded so they are not "fixed" later by accident:
+#
+#   1. Mongo runs STANDALONE, not as a replica set. The atomic swap (DECISIONS D3)
+#      is a single-document update on `repos.currentGraphVersionId`; nothing in
+#      ARCHITECTURE.md needs multi-document transactions or change streams. A
+#      replica set here would be cargo-cult.
+#
+#   2. NO collections or indexes are created here. ARCHITECTURE §7 is owned by
+#      M3 (BUILD_PLAN Step 3), which creates them in application code where they
+#      can be versioned and tested.
+#
+# Ports bind to 127.0.0.1 only — these are dev containers with no auth.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: impact-mongo
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.runCommand({ping:1}).ok']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: impact-redis
+    restart: unless-stopped
+    # BullMQ jobs should survive a container restart during development.
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  mongo-data:
+  redis-data:

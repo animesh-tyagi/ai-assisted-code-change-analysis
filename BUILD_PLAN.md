@@ -35,16 +35,28 @@ Answers appended to ARCHITECTURE §16.1. Summary:
 
 ---
 
-## Step 1 — Repo scaffold & foundations
+## Step 1 — Repo scaffold & foundations ✅ DONE
 **Goal:** a monorepo skeleton Claude Code can build into, plus local infra.
-- [ ] Monorepo layout per CLAUDE.md (`/api /worker /parser /web /shared /eval`).
-- [ ] `docker-compose.yml` bringing up MongoDB + Redis locally.
-- [ ] TypeScript strict config, linting, a test runner wired on the Node side.
-- [ ] `/shared` holds the TS types for the graph model and the context object (transcribe
+- [x] Monorepo layout per CLAUDE.md (`/api /worker /parser /web /shared /eval`). npm
+      workspaces; `/parser` and `/web` are README stubs owned by M2 and M7.
+- [x] `docker-compose.yml` bringing up MongoDB + Redis locally, with healthchecks.
+- [x] TypeScript strict config, linting, a test runner wired on the Node side.
+- [x] `/shared` holds the TS types for the graph model and the context object (transcribe
       from ARCHITECTURE §6 and §10) — one source of truth both services import.
-- [ ] CLAUDE.md, ARCHITECTURE.md, DECISIONS.md committed at the root.
-**Acceptance:** `docker compose up` gives working Mongo + Redis; `npm test` runs (even if
-empty); shared types compile.
+- [x] CLAUDE.md, ARCHITECTURE.md, DECISIONS.md committed at the root.
+**Acceptance:** met. `docker compose up` → both healthy, `mongosh` ping `1`, `redis-cli`
+`PONG`; `npm test` → 26 passing (`nodeKey`); `tsc -b` clean across all four TS packages;
+`npm run lint` clean; `GET /healthz` → 200.
+
+**Notes for later milestones:**
+- **TypeScript is pinned to 6.0.x, not 7.** TS 7 (the native rewrite) is `latest`, but
+  `typescript-eslint@8` declares `typescript: >=4.8.4 <6.1.0`. Revisit when
+  typescript-eslint ships TS 7 support — it is a version bump, not a code change.
+- `*.md` is in `.prettierignore` on purpose: Prettier reflows the design-doc tables into
+  padded pipe grids and rewrites `*emphasis*` to `_emphasis_`, which makes them markedly
+  harder to read and review. Code formatting only.
+- Node-key *derivation* stays in the Java parser (M2). `shared/src/nodeKey.ts` only
+  parses/formats the string form — do not let a second derivation grow in TypeScript.
 
 ---
 

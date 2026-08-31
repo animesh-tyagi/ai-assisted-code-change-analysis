@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+target/
+*.tsbuildinfo
+package-lock.json
+
+# Design docs are hand-authored prose. Prettier reflows markdown tables into
+# padded pipe grids and rewrites *emphasis* to _emphasis_, which makes the raw
+# files markedly harder to read and review. Code formatting only.
+*.md
