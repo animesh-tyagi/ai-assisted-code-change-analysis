@@ -55,4 +55,20 @@ docker-compose.yml   Mongo + Redis for local dev
 - Build fixtures from the two real Spring repos, not toy examples.
 
 ## Commands
-_Not yet implemented — fill in as milestones land (M1 sets up docker-compose + scaffolds)._
+```bash
+npm install            # once, at the root — npm workspaces
+npm run dev:infra      # docker compose up -d  (Mongo + Redis)
+npm run dev:infra:down # docker compose down
+npm run typecheck      # tsc -b across shared/api/worker/eval
+npm test               # vitest run  (npm run test:watch to watch)
+npm run lint           # eslint
+npm run format         # prettier (code only — *.md is ignored on purpose)
+npm run dev:api        # tsx watch; GET http://localhost:3000/healthz
+```
+Copy `.env.example` → `.env` before running anything that needs credentials.
+
+**Toolchain note:** TypeScript is pinned to **6.0.x**. TS 7 (the native rewrite) is `latest`,
+but `typescript-eslint@8` requires `typescript <6.1.0`. Bump both together when
+typescript-eslint supports TS 7.
+
+_Parser (`mvn`) commands land with M2; frontend commands with M7._

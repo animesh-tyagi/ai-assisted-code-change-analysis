@@ -202,3 +202,71 @@ to cross before this touches anyone else's private code.
 **Interview line:** "I benchmarked a free open model against a frontier model on my own rubric
 and chose on cost-versus-quality — and my correctness guard is model-independent, so going free
 cost me nothing in trust."
+
+
+---
+
+## Analysis triggers & test repos (added after M2 kickoff)
+
+### Analysis unit: a `(base, head)` commit pair; PR and push are two triggers (D9)
+**Chose:** the thing analysed is a diff between two commits — a `baseSha` and a `headSha`. A
+`pull_request` supplies them as `base.sha`/`head.sha`; a `push` to the default branch supplies
+them as `before`/`after`. `analyses.prNumber` is optional; `analyses.trigger` records which. A
+multi-commit push is one unit (`before`→`after`).
+**Why:** my own team works push-to-`main` with no PRs, and the original goal — "understand a
+teammate's change faster" — is exactly a post-push question. Supporting push makes the tool
+useful to push-to-`main` teams and matches the real use case at almost no cost: the analyze flow
+(§5.2) and base-graph pinning (D8/§9.5) are unchanged; only the webhook switch and the
+`analyses` key change.
+**Rejected:** PR-only (would never fire for my repos; fabricating PRs just to test is a
+workaround, not a feature).
+**Interview line:** "I separated the essential input — a diff — from GitHub's PR packaging, so
+the same engine serves both pull-request review and push-to-`main` teams."
+
+### Validation & eval repos: `observability-final` + `spring-petclinic-rest`
+**Chose:** two real repos, each covering what the other can't; both serve M2 validation and the
+M8 eval.
+- `observability-final` (my Spring Boot project): push-to-`main`, code I know cold. Validates
+  the call graph, route→controller, and unresolved handling; it's the push-trigger repo; eval
+  `(base, head)` pairs come from its commit history.
+- `spring-petclinic-rest` (canonical REST PetClinic): validates the two rules my repo lacks —
+  interface→single-`@Service`-impl (real `ClinicService` + `ClinicServiceImpl`) and Spring Data
+  derived queries; it's the PR-trigger repo; its real PRs feed the eval.
+**Why:** keeps the "no toy examples" rule intact — every rule is validated against genuine code,
+not author-written fixtures (fixtures stay, but only as regression tests). My second personal
+project was dropped: too few commits to validate or eval against.
+**Useful accidents:** petclinic-rest's multiple persistence profiles produce genuine multi-impl
+cases (a live test of the ambiguous-edge logic), and its MapStruct-generated mappers appear as
+`unresolved:` edges (a live test of unresolved handling). Neither is a bug.
+**Eval consequence:** the interface→impl and Spring Data rules are exercised in the eval only via
+petclinic-rest PRs, since `observability-final` doesn't use those patterns — so the corpus must
+include enough petclinic-rest PRs to cover them.
+
+
+---
+
+## Interface dispatch resolution (§6.4 refinement, after M2 kickoff)
+
+### Discovery is annotation-independent; over-approximate with `ambiguous` confidence
+**Context:** a real interface in `observability-final` (`FailureStrategy`) had four
+implementations wired by hand, none annotated `@Service`/`@Component`/`@Repository`. §6.4 as
+first written searched for impls *annotated* as Spring beans, so it would have found none and
+emitted no call edges through the interface.
+**Chose:** discover **all** implementations of an interface, regardless of annotations.
+- `implements` edges to every impl, always (structural fact: `exact`, `inferred: false`).
+- `calls`-through-interface edges (`inferred: true`) to the impl(s) a call could reach: one impl
+  → `single_impl`; a selector present (`@Primary`, or `@Qualifier` at the injection site) → that
+  impl, `single_impl`; otherwise (several impls, no selector — manual wiring included) → **all**
+  candidates, `ambiguous`. Never guess, never drop.
+- Annotations *narrow or rank* candidates; they do not *gate* whether an impl exists.
+**Why:** impact analysis cannot tolerate a false negative. If a call through the interface
+reaches an impl and we emit no edge, a change to that impl shows no callers — the exact blind
+spot the tool exists to prevent. The ambiguous edges are true over-approximations (the call
+really can dispatch to any impl at runtime, Spring-wired or not); `confidence`/`viaInferredEdge`
+carry the uncertainty into the traversal and force hedged phrasing downstream.
+**Rejected:** requiring a Spring-bean annotation before inferring any call edge ("a hand-built
+registry isn't DI") — truer to DI purity, but it turns an impact analyzer into a DI checker and
+creates the false-negative blind spot. No new `confidence` value needed — `ambiguous` covers it.
+**Interview line:** "For virtual dispatch I over-approximate to all reachable implementations
+with an 'ambiguous' confidence, because in impact analysis a false negative — silently missing a
+caller — is far more dangerous than a hedged false positive."
