@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.3</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.impact</groupId>
+  <artifactId>parser</artifactId>
+  <version>0.1.0</version>
+  <name>impact-parser</name>
+  <description>
+    Java parser service: builds the call graph and resolves Spring's implicit edges.
+    Stateless — reads a worktree path on a shared volume, returns JSON. No database,
+    no git, no network egress. See ARCHITECTURE.md sections 6 and 8.
+  </description>
+
+  <properties>
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!--
+      JavaParser + JavaSymbolSolver (CLAUDE.md rule 2). Never tree-sitter: real type
+      resolution and name binding are what the Spring edges depend on.
+    -->
+    <javaparser.version>3.27.0</javaparser.version>
+
+    <!--
+      ruleVersion is reported by GET /v1/version and stamped onto every graphVersion,
+      so changing a Spring inference rule invalidates graphs deliberately rather than
+      drifting silently (ARCHITECTURE section 8). Bump it whenever edge output changes.
+    -->
+    <parser.ruleVersion>1</parser.ruleVersion>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!--
+      symbol-solver-core transitively brings javaparser-core. Declaring only the
+      solver keeps the two versions from drifting apart.
+    -->
+    <dependency>
+      <groupId>com.github.javaparser</groupId>
+      <artifactId>javaparser-symbol-solver-core</artifactId>
+      <version>${javaparser.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
+
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+</project>

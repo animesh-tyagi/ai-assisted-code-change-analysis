@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: impact-parser
+
+server:
+  port: 8080
+
+# Reported by GET /v1/version and stamped onto every graphVersion, so a parser
+# upgrade can invalidate graphs deliberately instead of silently mixing analyses
+# produced by different inference rules (ARCHITECTURE section 8).
+parser:
+  version: '@project.version@'
+  rule-version: '@parser.ruleVersion@'
+  javaparser-version: '@javaparser.version@'
+
+logging:
+  level:
+    com.impact.parser: INFO
