@@ -270,3 +270,40 @@ creates the false-negative blind spot. No new `confidence` value needed — `amb
 **Interview line:** "For virtual dispatch I over-approximate to all reachable implementations
 with an 'ambiguous' confidence, because in impact analysis a false negative — silently missing a
 caller — is far more dangerous than a hedged false positive."
+
+
+---
+
+## Pending decisions
+
+Open items awaiting a call. Each states the evidence and the intended default so work can
+proceed; move it into the body above once decided.
+
+### ⏳ PENDING — Spring Data: which base interfaces count as a repository? (§6.4)
+**Status:** pending. Needed before M2 phase 5 (Spring rules). Proceeding on the intended
+default below unless overridden.
+**Found during:** M2 phase 1, verifying `spring-petclinic-rest` after cloning it to
+`_validation/`.
+**The gap:** ARCHITECTURE §6.4 defines a Spring Data repository as an interface extending
+`JpaRepository<T,ID>`, `CrudRepository`, or `PagingAndSortingRepository`. But
+`spring-petclinic-rest` — the repo chosen specifically to validate this rule — extends the
+*base marker* `org.springframework.data.repository.Repository<T,ID>` instead:
+
+```java
+@Profile("spring-data-jpa")
+public interface SpringDataOwnerRepository extends OwnerRepository, Repository<Owner, Integer> { … }
+```
+
+Implemented literally, the rule matches **zero** interfaces in the one repo meant to prove it
+works, and the Spring Data edge type would ship unvalidated against real code.
+**Intended default:** treat the whole Spring Data repository family as repositories — the base
+`Repository<T,ID>` marker included — and take the entity from the first type argument wherever
+it appears in the hierarchy. `Repository<T,ID>` is the root the other three all extend, so
+matching it is strictly more general and cannot lose a match.
+**Also worth noting for the same rule:** petclinic's derived-query surface is thinner than
+assumed. Most methods are `@Query`-annotated (the `regex` confidence path) or inherited from a
+plain non-Spring-Data interface; genuine derived names (`findByLastName`) exist but are the
+minority. Both paths are exercised, just not in the proportion the doc implies.
+**Consequence if deferred:** phase 5 ships a Spring Data rule with no real-code validation,
+which is exactly what the "no toy examples" convention exists to prevent.
+**Decision:** _pending_ — update §6.4 to match, or state why the narrower set is intended.
