@@ -11,52 +11,57 @@ frontend and eval last but budget real time for them.
 
 ---
 
-## Step 0 — Close the open questions (do this first) ✅ DONE
+## Step 0 — Close the open questions (do this first)
 
-Answers appended to ARCHITECTURE §16.1. Summary:
+Claude Code will stall on ARCHITECTURE §16. Recommended v1 answers (confirm or change):
 
-- [x] **Q1 (renames):** new node, old one disappears with its version. Rename-linking → roadmap.
-- [x] **Q2 (test sources):** **excluded** `src/test/java` from the graph in v1 (leaner scope).
+- **Q1 (renames):** new node, old one disappears with its version. Rename-linking → roadmap.
+- **Q2 (test sources):** **exclude** `src/test/java` from the graph in v1 (leaner scope).
   Test-coverage edges ("which tests cover this change") → roadmap.
-- [x] **Q3 (multi-module):** checked both real repos (`dummy-proj/Dummy`,
-  `oberservability-final/Dummy`) — both are **single-module** (no `<modules>` in either
-  `pom.xml`). §8's per-source-root discovery stands as written either way.
-- [x] **Q4 (data surfaces):** keep `data` under `reachableSurfaces` but distinct from
-  `entrypoints`; it's a forward relationship. Confirmed as documented.
-- [x] **Q5 (base SHA):** `pull_request.base.sha` for v1; merge-base → roadmap.
-- [x] **Q6 (auth posture):** single-tenant, no login, behind a network boundary. Paired with the
-  free-tier Gemini training note.
-- [x] **Q7 (source to LLM):** changed method's unified diff only, ~200 lines capped. No caller bodies.
-- [x] **Q8 (retention of analyses/explanations):** keep — they're small and they *are* the eval
+- **Q3 (multi-module):** check both repos. If multi-module, one graph, a `JavaParserTypeSolver`
+  per `**/src/main/java` root so cross-module calls resolve. (Affects M2.)
+- **Q4 (data surfaces):** keep `data` under `reachableSurfaces` but distinct from
+  `entrypoints`; it's a forward relationship. Fine as documented.
+- **Q5 (base SHA):** for a PR, `pull_request.base.sha`; for a push to `main` (see M6/D9), the
+  push's `before` SHA. Merge-base → roadmap.
+- **Q6 (auth posture):** single-tenant, no login, behind a network boundary. Add the free-tier
+  Gemini training note here.
+- **Q7 (source to LLM):** changed method's unified diff only, ~200 lines capped. No caller bodies.
+- **Q8 (retention of analyses/explanations):** keep — they're small and they *are* the eval
   corpus.
-- [x] **Q9 (scale ceiling):** deferred — set the hard file/edge cap once M2 gives real timings
-  against both target repos.
-- [x] **Q10 (frontend graph cap):** ~150 nodes, collapse beyond. Confirmed; revisit visually in M7.
+- **Q9 (scale ceiling):** pick a hard file/edge cap at which indexing fails loudly (e.g. > N
+  files) rather than silently blowing the latency budget. Set N when M2 gives real timings.
+- **Q10 (frontend graph cap):** ~150 nodes, collapse beyond. Confirm in M7.
+
+**Repos in play (validation + eval).** Two real repos, each covering what the other can't;
+both serve M2 validation and the M8 eval:
+- **`observability-final`** (your Spring Boot project, on your desktop) — push-to-`main`, no
+  PRs. Validates the call graph, route→controller, and unresolved handling on code you know
+  cold, and is the push-trigger repo (M6). Eval `(base, head)` pairs come from its commit
+  history (M8).
+- **`spring-petclinic/spring-petclinic-rest`** — canonical REST PetClinic. Validates the two
+  rules `observability-final` can't: interface→single-`@Service`-impl (real `ClinicService` +
+  `ClinicServiceImpl`) and Spring Data derived queries. Also the PR-trigger repo, and its real
+  PRs feed the eval. Two useful accidents: multiple persistence profiles produce genuine
+  multi-impl (ambiguous-edge) cases, and MapStruct-generated mappers appear as `unresolved:`
+  edges — both are real-world tests, not bugs.
+
+(The second personal project was dropped — too few commits to validate or eval against.)
+
+**Deliverable:** a short answers block appended to ARCHITECTURE §16, or ticked here.
 
 ---
 
-## Step 1 — Repo scaffold & foundations ✅ DONE
+## Step 1 — Repo scaffold & foundations
 **Goal:** a monorepo skeleton Claude Code can build into, plus local infra.
-- [x] Monorepo layout per CLAUDE.md (`/api /worker /parser /web /shared /eval`). npm
-      workspaces; `/parser` and `/web` are README stubs owned by M2 and M7.
-- [x] `docker-compose.yml` bringing up MongoDB + Redis locally, with healthchecks.
-- [x] TypeScript strict config, linting, a test runner wired on the Node side.
-- [x] `/shared` holds the TS types for the graph model and the context object (transcribe
+- [ ] Monorepo layout per CLAUDE.md (`/api /worker /parser /web /shared /eval`).
+- [ ] `docker-compose.yml` bringing up MongoDB + Redis locally.
+- [ ] TypeScript strict config, linting, a test runner wired on the Node side.
+- [ ] `/shared` holds the TS types for the graph model and the context object (transcribe
       from ARCHITECTURE §6 and §10) — one source of truth both services import.
-- [x] CLAUDE.md, ARCHITECTURE.md, DECISIONS.md committed at the root.
-**Acceptance:** met. `docker compose up` → both healthy, `mongosh` ping `1`, `redis-cli`
-`PONG`; `npm test` → 26 passing (`nodeKey`); `tsc -b` clean across all four TS packages;
-`npm run lint` clean; `GET /healthz` → 200.
-
-**Notes for later milestones:**
-- **TypeScript is pinned to 6.0.x, not 7.** TS 7 (the native rewrite) is `latest`, but
-  `typescript-eslint@8` declares `typescript: >=4.8.4 <6.1.0`. Revisit when
-  typescript-eslint ships TS 7 support — it is a version bump, not a code change.
-- `*.md` is in `.prettierignore` on purpose: Prettier reflows the design-doc tables into
-  padded pipe grids and rewrites `*emphasis*` to `_emphasis_`, which makes them markedly
-  harder to read and review. Code formatting only.
-- Node-key *derivation* stays in the Java parser (M2). `shared/src/nodeKey.ts` only
-  parses/formats the string form — do not let a second derivation grow in TypeScript.
+- [ ] CLAUDE.md, ARCHITECTURE.md, DECISIONS.md committed at the root.
+**Acceptance:** `docker compose up` gives working Mongo + Redis; `npm test` runs (even if
+empty); shared types compile.
 
 ---
 
@@ -70,18 +75,23 @@ around them. If the graph is wrong, nothing downstream matters.
       normalized key). **Unit-test the key derivation hard** — it's load-bearing.
 - [ ] Resolved `calls` / `implements` / `overrides` edges. Unresolved calls → `unresolved:`
       nodes, never dropped (§6.5).
-- [ ] **Spring rules (§6.4):** interface → single `@Service`/`@Component`/`@Repository` impl
-      (with `@Primary`/`@Qualifier`/ambiguous handling); `@RequestMapping` route → controller
-      method; Spring Data derived query → entity → table.
+- [ ] **Spring rules (§6.4):** interface → implementation(s) — discover **all** impls
+      (annotation-independent); `implements` to each; `calls` to the selected impl
+      (`@Primary`/`@Qualifier` → `single_impl`) or, when none is selected, to all candidates
+      including hand-wired ones (`ambiguous`); `@RequestMapping` route → controller method;
+      Spring Data derived query → entity → table.
 - [ ] Emit `inferred` + `confidence` on every edge.
 - [ ] Start as a **CLI** (point at a directory, dump the §8 JSON); eyeball the edges on code
       you know before adding HTTP.
 - [ ] Then wrap in `POST /v1/parse` (full + subset modes), `GET /v1/version`, health checks
       per ARCHITECTURE §8.
 - [ ] **Snapshot-test** the parser output on a fixture repo (it's a pure function — §8).
-**Acceptance:** run against **both your real Spring repos**; the call graph and the three
-Spring edge types are correct on manual inspection; `unresolvedRate` is sane; identical input
-gives byte-identical output.
+**Acceptance:** run against **`observability-final`** (call graph, route→controller,
+unresolved handling — code you know) and **`spring-petclinic-rest`** (interface→single-impl and
+Spring Data derived queries — the two rules `observability-final` lacks); every edge type is
+correct on manual inspection; `unresolvedRate` is sane (expect MapStruct-generated mappers as
+`unresolved:` in petclinic-rest, and its persistence profiles to exercise the ambiguous-edge
+path); identical input gives byte-identical output.
 
 ---
 
@@ -132,17 +142,22 @@ the cache and makes no API call.
 ---
 
 ## Step 6 — Webhook + queue + orchestration (connect it end-to-end)
-**Goal:** a real PR flows from GitHub to a stored explanation with no manual steps.
+**Goal:** a real change — a PR *or* a push to `main` — flows from GitHub to a stored
+explanation with no manual steps.
 - [ ] GitHub App registration; installation callback; `installations`/`repos` upsert.
 - [ ] `POST /api/webhooks/github`: raw-body signature verify, delivery dedupe, event switch,
       202 fast (§9.1). p99 < 500ms.
+- [ ] Two analyze triggers onto one `(baseSha, headSha)` unit (D9): `pull_request`
+      opened/synchronize (base=`base.sha`, head=`head.sha`), and `push` to the default branch
+      (base=`before`, head=`after`; skip on branch-create/force-push; a multi-commit push is
+      one unit). A push also re-indexes (§5.1).
 - [ ] BullMQ `index` / `analyze` / `history` queues with deterministic job IDs + per-repo lock
       (§9.2), retries with classification (§9.3), analyze-waits-for-base-graph backoff (§9.4).
 - [ ] Worker wires M2–M5 together for the analyze flow (§5.2); pinning (§9.5).
 - [ ] Read endpoints + polling (§9.6).
-**Acceptance:** open a PR on a real repo → webhook → job → analysis appears via polling;
-redelivered webhook and double-run are deduped; a missing base graph triggers an index and
-resolves.
+**Acceptance:** a push to `observability-final`'s `main` → webhook → index + analysis appears
+via polling; a PR on `petclinic-rest` → webhook → analysis appears; redelivered webhook and
+double-run are deduped; a missing base graph triggers an index and resolves.
 
 ---
 
@@ -159,8 +174,11 @@ reads clearly on a repo you know; record a short demo clip.
 
 ## Step 8 — The eval (the differentiator — do not skip)
 **Goal:** a number that answers "why not just paste the diff into ChatGPT?"
-- [ ] Collect 20–30 real PRs from your two repos into `/eval`.
-- [ ] Hand-write the "what a reviewer needed to know" ground truth per PR.
+- [ ] Build a corpus of 20–30 change units into `/eval`, sourced two ways since
+      `observability-final` has no PRs: derive `(base, head)` pairs from its `main` commit
+      history (`commit^..commit` or small ranges), and take real PRs from `spring-petclinic-rest`
+      (which also give the only eval coverage of the interface→impl and Spring Data rules).
+- [ ] Hand-write the "what a reviewer needed to know" ground truth per change unit.
 - [ ] Two conditions: graph-grounded context object vs diff-only-to-LLM baseline.
 - [ ] Rubric: caught affected callers? flagged the breaking signature change? hallucinated?
 - [ ] Run across Gemini Flash **and** at least one other model via `LLMProvider` (the

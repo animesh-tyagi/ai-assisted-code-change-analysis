@@ -32,7 +32,7 @@ options:
 | C3 | The valuable work is resolving Spring's implicit edges: interface → single `@Service` impl, `@RequestMapping` route → controller method, Spring Data derived query → entity/table. |
 | C4 | Function identity key is `fqcn#method(paramTypes)`. A signature change is the same node with a new version. |
 | C5 | The graph lives in a separate `edges` collection (`{from, to, type}`, indexed both ways). Not caller/callee arrays embedded on nodes. |
-| C6 | GitHub webhooks: re-index on push to the default branch, analyze on `pull_request` `opened`/`synchronize`. The handler must return 2xx well within GitHub's ~10s delivery timeout, so all real work runs async on a BullMQ queue that the frontend polls. |
+| C6 | GitHub webhooks: on a push to the default branch, re-index **and** analyze the pushed range (`before`→`after`); on `pull_request` `opened`/`synchronize`, analyze the PR. Both triggers feed one analysis unit — a `(baseSha, headSha)` commit pair (D9). The handler must return 2xx well within GitHub's ~10s delivery timeout, so all real work runs async on a BullMQ queue that the frontend polls. |
 | C7 | Per-function change history uses `git log -L <start>,<end>:<file>`, cached per function key. |
 
 ## 3. Decisions taken during design
@@ -47,6 +47,7 @@ options:
 | D6 | **A post-generation symbol validator enforces C1 mechanically**, on top of prompt discipline. | Deterministic, cheap, and catches the failure mode that actually destroys trust: invented class names, routes, and counts. Its known gap — a wrong *relationship* between two real symbols — is stated in §11.4. |
 | D7 | **GitHub App** for webhooks and cloning. | Short-lived per-installation tokens, managed webhooks, signed deliveries. No long-lived PAT at rest. |
 | D8 | **PR analysis pins the base graph version** for the whole run and never re-reads "current" mid-analysis. | Reproducibility, and it is what makes D3's pointer swap safe. |
+| D9 | **The analysis unit is a `(baseSha, headSha)` commit pair, not a PR.** A `pull_request` and a `push` to the default branch are two triggers onto the same analysis: a PR supplies `base.sha`/`head.sha`, a push supplies `before`/`after`. `analyses.prNumber` is optional; `analyses.trigger` records which. A multi-commit push is one unit (`before`→`after`). | Supports push-to-`main` teams — the original use case is understanding a teammate's change that landed on `main`, which is a post-push question — and separates the essential input (a diff) from GitHub's PR packaging. Reuses the entire analyze flow (§5.2) and base-graph pinning (D8) unchanged. |
 
 ---
 
@@ -111,10 +112,10 @@ gives `git log -L` (§12) a real repository to walk.
 Nothing before step 7 is visible to readers. A failed parse leaves
 `status: "failed"` and the previous graph serving.
 
-### 5.2 Analyze flow — `pull_request` `opened` / `synchronize`
+### 5.2 Analyze flow — `pull_request` `opened`/`synchronize`, or `push` to the default branch
 
-1. Webhook verified and deduped; any prior analysis for the same PR is superseded; `analyze` job enqueued; **202 returned** with an `analysisId` the frontend can poll immediately.
-2. Worker resolves the base graph for `pull_request.base.sha`. If it is not `ready`, the worker enqueues an index job for that SHA and re-schedules itself with backoff (§9.4).
+1. Webhook verified and deduped; any prior non-superseded analysis for the same unit (same repo + `headSha`, or same PR) is superseded; `analyze` job enqueued; **202 returned** with an `analysisId` the frontend can poll immediately. The unit's `baseSha`/`headSha` come from `base.sha`/`head.sha` for a PR, or `before`/`after` for a push (D9).
+2. Worker resolves the base graph for the analysis's `baseSha`. If it is not `ready`, the worker enqueues an index job for that SHA and re-schedules itself with backoff (§9.4).
 3. Worker **pins** the base graph version.
 4. Worker creates a worktree at `head.sha` and computes the changed file list (`git diff --name-status base...head`).
 5. Worker `POST /v1/parse` with `mode: "subset"` and that file list → the **head overlay**: nodes and edges for the touched files only, stored as a `graphVersion` with `kind: "pr_overlay"`.
@@ -194,15 +195,30 @@ something, and they propagate into the explanation.
 
 This is the part that makes the product work, so the rules are spelled out.
 
-**Interface → single implementation.** For interface `I` with method `m`, find
-classes implementing `I` annotated `@Service`, `@Component`, or `@Repository`.
+**Interface → implementation(s).** For interface `I` with method `m`, find **all**
+classes implementing `I`. Annotations do **not** gate discovery — a real call can
+dispatch to any implementation at runtime whether it is wired by Spring or by hand,
+so annotations are used only to *narrow or rank* the candidates, never to decide
+whether an impl exists.
 
-- Exactly one impl → emit `implements` (impl.m → I.m) and, for every call site
-  that resolved to `I.m`, emit an additional `calls` edge to `Impl.m` with
-  `inferred: true, confidence: "single_impl"`.
-- Several impls → prefer `@Primary`; else read `@Qualifier` at the injection
-  site; else emit edges to **all** candidates with `confidence: "ambiguous"`.
-  Never guess one, never drop them.
+- Always emit `implements` (impl.m → I.m) for **every** implementation. This is a
+  structural type fact: `confidence: "exact"`, `inferred: false`.
+- For each call site that resolved to `I.m`, emit `calls` edges (`inferred: true`)
+  to the implementation(s) the call could reach:
+  - Exactly one implementation → `calls` to it, `confidence: "single_impl"`.
+  - Several, and one is selected (`@Primary`, or a `@Qualifier` matched at the
+    injection site) → `calls` to the selected impl, `confidence: "single_impl"`.
+  - Several with no selector — **including impls wired manually with no
+    `@Service`/`@Component`/`@Repository`** → `calls` to **all** candidates,
+    `confidence: "ambiguous"`. Never guess one, never drop them.
+
+Rationale: impact analysis cannot tolerate a false negative. If a call through `I`
+reaches an impl and we emit no edge, a change to that impl looks like it has no
+callers — the one failure the tool exists to prevent. The ambiguous edges are true
+over-approximations (the call really can dispatch to any of them), and the
+`confidence` / `viaInferredEdge` fields carry that uncertainty into the traversal
+and force hedged phrasing in the explanation. See DECISIONS ("interface dispatch
+resolution").
 
 **Route → controller method.** Concatenate the class-level `@RequestMapping`
 path with the method-level `@GetMapping` / `@PostMapping` / `@PutMapping` /
@@ -331,7 +347,9 @@ double-counts a caller.
 
 ### `analyses`
 ```js
-{ _id, repoId, prNumber, baseSha, headSha,
+{ _id, repoId, trigger: "pull_request" | "push",
+  prNumber,            // present only when trigger === "pull_request"
+  baseSha, headSha,    // PR: base.sha / head.sha  ·  push: before / after
   baseGraphVersionId, overlayGraphVersionId, deliveryId, jobId,
   status: "queued" | "cloning" | "parsing" | "traversing"
         | "explaining" | "ready" | "failed" | "superseded",
@@ -339,7 +357,9 @@ double-counts a caller.
   changedFunctions: [ { functionKey, changeKind, contextHash, explanationId } ],
   error, createdAt, updatedAt }
 ```
-Indexes: `{ repoId: 1, prNumber: 1, headSha: 1 }` unique;
+The analysis unit is the `(baseSha, headSha)` pair (D9); `prNumber` is optional.
+Indexes: `{ repoId: 1, baseSha: 1, headSha: 1 }` unique;
+`{ repoId: 1, prNumber: 1, headSha: 1 }` sparse (PR lookups);
 `{ status: 1, updatedAt: -1 }`.
 
 ### `explanations`
@@ -481,8 +501,8 @@ Liveness and readiness. `readyz` fails if the shared volume is not mounted.
 2. Verify `X-Hub-Signature-256` with `crypto.timingSafeEqual`. Invalid → `401`.
 3. Insert `webhookDeliveries` with `_id = X-GitHub-Delivery`. Duplicate key → `200`, done.
 4. Switch on event:
-   - `push` to the default branch → enqueue `index`
-   - `pull_request` `opened` / `synchronize` / `reopened` → create the `analyses` doc, enqueue `analyze`
+   - `push` to the default branch → enqueue `index`, and (unless `before` is the zero SHA or is not an ancestor of `after` — branch creation or force-push) create a `push` `analyses` doc for `before`→`after` and enqueue `analyze`. A multi-commit push is analysed as one unit ("what this push introduced"), not per commit.
+   - `pull_request` `opened` / `synchronize` / `reopened` → create a `pull_request` `analyses` doc, enqueue `analyze`
    - `installation`, `installation_repositories` → upsert `installations` / `repos`
    - anything else → ack and ignore
 5. Respond **`202`** with `{ deliveryId, analysisId? }`.
@@ -833,9 +853,10 @@ tables and entities are *downstream* (forward) of the change. §10 splits them i
 `entrypoints` and `data` under one `reachableSurfaces` key. Is that the intended
 reading, or should `data` move under `nowDependsOn`?
 
-**Q5 — Base SHA semantics.** *Assumption:* use `pull_request.base.sha` from the
-payload. That is the tip of the base branch at event time, not the merge base.
-For a long-lived PR the merge base is usually the more honest comparison. Which?
+**Q5 — Base SHA semantics.** *Assumption:* for a PR, use `pull_request.base.sha` from
+the payload (the tip of the base branch at event time, not the merge base; for a long-lived PR
+the merge base is usually the more honest comparison — which?). For a `push` (D9), base is the
+push's `before` SHA and head is `after`.
 
 **Q6 — App-level authentication.** Access control is out of scope, but with a
 GitHub App the web app renders private source diffs. *Assumption:* single-tenant,
@@ -897,9 +918,7 @@ Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone
 - **Q9 (scale ceiling):** deferred to M2 — pick the hard file/edge cap once real
   parse timings exist against both target repos, rather than guess a number now.
 - **Q10 (frontend graph cap):** ~150 nodes, collapse beyond that. Confirmed;
-  revisit visually in M7.
-
----
+  revisit visually in M7.---
 
 ## 17. Roadmap (documented, not built)
 
