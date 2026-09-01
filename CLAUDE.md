@@ -71,4 +71,19 @@ Copy `.env.example` → `.env` before running anything that needs credentials.
 but `typescript-eslint@8` requires `typescript <6.1.0`. Bump both together when
 typescript-eslint supports TS 7.
 
-_Parser (`mvn`) commands land with M2; frontend commands with M7._
+Parser service (`/parser`, Java 21 + Maven):
+```bash
+cd parser && mvn test            # unit + regression tests
+cd parser && mvn spring-boot:run # serves on :8080 (HTTP lands in M2 phase 7)
+```
+
+Validating the parser against the two real repos (DECISIONS, "Validation & eval repos").
+These tests **skip** when the properties are unset, so a plain `mvn test` stays green
+without the checkouts:
+```bash
+cd parser && mvn test -Dtest=RealRepoExtractionTest -Dvalidation.observability="C:/Users/anime/OneDrive/Desktop/oberservability-final/Dummy" -Dvalidation.petclinic="C:/Users/anime/OneDrive/Desktop/mern-llm-proj/_validation/spring-petclinic-rest"
+```
+Note the folder on disk is spelled `oberservability-final`; the docs call the repo
+`observability-final`.
+
+_Frontend commands land with M7._
