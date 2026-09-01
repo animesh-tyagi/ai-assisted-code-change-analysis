@@ -62,13 +62,37 @@ public final class SourceRootDiscovery {
         }
     }
 
+    /**
+     * Directories that hold build output rather than source.
+     *
+     * <p>Skipping these is not tidiness. petclinic-rest generates OpenAPI
+     * interfaces into {@code target/generated-sources/openapi/src/main/java},
+     * which matches the source-root pattern exactly — so without this the parser
+     * indexed generated code that is not in git, inflating the graph with nodes
+     * no commit can ever change and no reviewer would recognise.
+     */
+    private static final List<String> BUILD_OUTPUT_DIRS =
+            List.of("target", "build", "out", "bin", "node_modules", ".git", ".gradle", ".mvn");
+
     private static boolean matchesSourceRoot(Path workspaceRoot, Path dir, boolean includeTestSources) {
         String relative =
                 workspaceRoot.relativize(dir).toString().replace(WorkspaceLayout.WINDOWS_SEPARATOR, '/');
+        if (isUnderBuildOutput(relative)) {
+            return false;
+        }
         if (relative.equals(MAIN_JAVA) || relative.endsWith("/" + MAIN_JAVA)) {
             return true;
         }
         return includeTestSources && (relative.equals(TEST_JAVA) || relative.endsWith("/" + TEST_JAVA));
+    }
+
+    private static boolean isUnderBuildOutput(String relativePath) {
+        for (String segment : relativePath.split("/")) {
+            if (BUILD_OUTPUT_DIRS.contains(segment)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Every {@code .java} file under the given roots, sorted for determinism. */

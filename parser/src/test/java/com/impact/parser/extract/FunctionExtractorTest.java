@@ -43,7 +43,7 @@ class FunctionExtractorTest {
         WorkspaceLayout layout = SourceRootDiscovery.discover(tempDir, false);
         var solver = new SourceAndJdkTypeSolverFactory().create(layout);
         List<Path> files = subset != null ? subset : SourceRootDiscovery.javaFiles(layout);
-        return new FunctionExtractor(solver).extract(layout, files);
+        return new GraphExtractor(solver).extract(layout, files);
     }
 
     private static ParsedFunction byMethodName(ExtractionResult result, String name) {

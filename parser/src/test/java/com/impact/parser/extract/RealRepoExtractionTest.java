@@ -3,6 +3,7 @@ package com.impact.parser.extract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import com.impact.parser.graph.EdgeType;
 import com.impact.parser.graph.ParsedFunction;
 import com.impact.parser.resolve.SourceAndJdkTypeSolverFactory;
 import com.impact.parser.workspace.SourceRootDiscovery;
@@ -40,7 +41,7 @@ class RealRepoExtractionTest {
     private static ExtractionResult extract(Path repo) {
         WorkspaceLayout layout = SourceRootDiscovery.discover(repo, false);
         var solver = new SourceAndJdkTypeSolverFactory().create(layout);
-        return new FunctionExtractor(solver).extract(layout, SourceRootDiscovery.javaFiles(layout));
+        return new GraphExtractor(solver).extract(layout, SourceRootDiscovery.javaFiles(layout));
     }
 
     private static void report(String label, Path repo, ExtractionResult result, long millis) {
@@ -50,6 +51,10 @@ class RealRepoExtractionTest {
                         + "  parse errors        : %d%n"
                         + "  functions           : %d%n"
                         + "  unresolved params   : %d (%.1f%% of all parameters)%n"
+                        + "  edges               : %d  (calls %d, implements %d, overrides %d, unresolved %d)%n"
+                        + "  unresolvedRate      : %.1f%%  [section 6.5 health metric]%n"
+                        + "  external calls      : %d  (resolved but out of scope, not graphed)%n"
+                        + "  ambiguous overloads : %d%n"
                         + "  extraction time     : %d ms%n",
                 label,
                 result.filesParsed(),
@@ -57,6 +62,14 @@ class RealRepoExtractionTest {
                 result.functions().size(),
                 result.unresolvedParamTypes(),
                 result.unresolvedParamRate() * 100,
+                result.edges().size(),
+                countOf(result, EdgeType.CALLS),
+                countOf(result, EdgeType.IMPLEMENTS),
+                countOf(result, EdgeType.OVERRIDES),
+                countOf(result, EdgeType.UNRESOLVED),
+                result.unresolvedRate() * 100,
+                result.externalCalls(),
+                result.ambiguousOverloads().size(),
                 millis);
 
         result.parseErrors().forEach(e -> System.out.printf("  PARSE ERROR %s: %s%n", e.filePath(), e.message()));
@@ -75,6 +88,10 @@ class RealRepoExtractionTest {
                 .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                 .limit(8)
                 .forEach(e -> System.out.printf("    %-60s %d%n", e.getKey(), e.getValue()));
+    }
+
+    private static long countOf(ExtractionResult result, EdgeType type) {
+        return result.edges().stream().filter(e -> e.type() == type).count();
     }
 
     private static boolean isPrimitive(String type) {
