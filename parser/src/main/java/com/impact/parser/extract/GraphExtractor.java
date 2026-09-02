@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -77,10 +78,17 @@ public final class GraphExtractor {
         List<ParseError> errors = new ArrayList<>();
         EdgeCollector collector = new EdgeCollector();
         EdgeExtractor.Stats stats = new EdgeExtractor.Stats();
-        EdgeExtractor edgeExtractor = new EdgeExtractor(collector, stats);
+        Map<String, String> keyIndexRef = new HashMap<>();
+        EdgeExtractor edgeExtractor = new EdgeExtractor(collector, stats, keyIndexRef);
 
         int filesParsed = 0;
         int unresolvedParams = 0;
+
+        // Parsed once, walked twice. Function extraction has to finish for every
+        // file before edge extraction starts, because an edge target can live in a
+        // file that has not been reached yet and its key must already be known.
+        List<ParsedFile> parsed = new ArrayList<>();
+        Map<String, String> keyIndex = keyIndexRef;
 
         for (Path file : files) {
             String relativePath = layout.relativize(file);
@@ -108,14 +116,19 @@ public final class GraphExtractor {
             functions.addAll(extracted.functions());
             errors.addAll(extracted.errors());
             unresolvedParams += extracted.unresolvedParamTypes();
+            keyIndex.putAll(extracted.keysByPosition());
 
+            parsed.add(new ParsedFile(cu, relativePath, anonymousNames));
+        }
+
+        for (ParsedFile file : parsed) {
             try {
-                edgeExtractor.extractFrom(cu, relativePath, anonymousNames);
+                edgeExtractor.extractFrom(file.cu(), file.relativePath(), file.anonymousNames());
             } catch (RuntimeException e) {
                 // Edge extraction failing must not cost us the file's nodes.
                 errors.add(
                         new ParseError(
-                                relativePath,
+                                file.relativePath(),
                                 "edge extraction failed: "
                                         + e.getClass().getSimpleName()
                                         + ": "
@@ -136,6 +149,10 @@ public final class GraphExtractor {
                 stats.externalCalls,
                 ambiguous);
     }
+
+    /** One parsed file, retained between the two passes. */
+    private record ParsedFile(
+            CompilationUnit cu, String relativePath, Map<ObjectCreationExpr, String> anonymousNames) {}
 
     private JavaParser configuredParser() {
         ParserConfiguration config =

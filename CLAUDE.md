@@ -53,6 +53,15 @@ docker-compose.yml   Mongo + Redis for local dev
   a bug there is silent.
 - One milestone per branch/PR (see BUILD_PLAN.md). Prefer plan mode for each milestone.
 - Build fixtures from the two real Spring repos, not toy examples.
+- **Verify builds by EXIT CODE, never by grepping output for "ERROR".** A grep that
+  finds nothing is not a passing build. `mvn ... ; echo $?` — 0 or it did not pass.
+  (Learned the hard way in M2 phase 4: a false green sent work down a dead end.)
+- **Measure only after a green build.** Re-running a measurement against a failed
+  build measures stale classes. Fix → build green → measure once, not fix → measure
+  → fix.
+- **Never let a broad `catch` hide a defect.** `catch (RuntimeException ignored)` around
+  extraction turned a real bug into "no edges emitted" with no signal. If a catch is
+  load-bearing for resilience, count what it swallows and surface the count.
 
 ## Commands
 ```bash

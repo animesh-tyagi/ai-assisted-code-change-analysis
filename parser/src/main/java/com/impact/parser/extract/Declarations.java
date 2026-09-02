@@ -142,6 +142,22 @@ final class Declarations {
         return Optional.empty();
     }
 
+    /**
+     * A parse-independent identity for a declaration: absolute file path plus
+     * start line.
+     *
+     * <p>Node object identity cannot be used, because the same declaration is
+     * parsed twice — once by the extractor and once inside
+     * {@code JavaParserTypeSolver} — producing two unrelated AST objects. A
+     * source position is the same in both.
+     */
+    static Optional<String> positionOf(com.github.javaparser.ast.Node node) {
+        return node.findCompilationUnit()
+                .flatMap(CompilationUnit::getStorage)
+                .map(storage -> storage.getPath().toAbsolutePath().normalize().toString())
+                .flatMap(path -> node.getBegin().map(begin -> path + "#" + begin.line));
+    }
+
     static String simpleNameOf(String fqcn) {
         int lastDot = fqcn.lastIndexOf('.');
         return lastDot == -1 ? fqcn : fqcn.substring(lastDot + 1);

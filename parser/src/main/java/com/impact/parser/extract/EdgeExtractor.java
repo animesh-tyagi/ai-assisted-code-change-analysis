@@ -54,12 +54,12 @@ final class EdgeExtractor {
 
     private final EdgeCollector collector;
     private final Stats stats;
-    private final Map<CompilationUnit, Map<ObjectCreationExpr, String>> anonymousNameCache =
-            new java.util.IdentityHashMap<>();
+    private final Map<String, String> keyIndex;
 
-    EdgeExtractor(EdgeCollector collector, Stats stats) {
+    EdgeExtractor(EdgeCollector collector, Stats stats, Map<String, String> keyIndex) {
         this.collector = collector;
         this.stats = stats;
+        this.keyIndex = keyIndex;
     }
 
     void extractFrom(
@@ -180,28 +180,41 @@ final class EdgeExtractor {
      * construction.
      */
     private String keyOfTarget(ResolvedMethodDeclaration target) {
-        return target.toAst()
-                .map(ast -> Declarations.keyOf(ast, anonymousNamesFor(ast)))
-                .orElseGet(() -> NodeKeys.forMethod(target));
+        return indexedKey(target).orElseGet(() -> NodeKeys.forMethod(target));
     }
 
     private String keyOfTarget(ResolvedConstructorDeclaration target) {
-        return target.toAst()
-                .map(ast -> Declarations.keyOf(ast, anonymousNamesFor(ast)))
-                .orElseGet(() -> NodeKeys.forConstructor(target));
+        return indexedKey(target).orElseGet(() -> NodeKeys.forConstructor(target));
     }
 
     /**
-     * Anonymous-class names for whatever file the target lives in, cached.
+     * The key {@code functions[]} already gave this declaration, found by source
+     * position.
      *
-     * <p>A call can land in another compilation unit, and its anonymous classes
-     * are numbered per file — so the numbering has to be computed against the
-     * target's own unit, not the caller's.
+     * <p>Looking the key up rather than recomputing it is the only way to
+     * guarantee an edge target matches its node. Recomputing from the AST that
+     * {@code toAst()} returns does <em>not</em> work: that node comes from
+     * {@code JavaParserTypeSolver}'s own internal parse, which carries no symbol
+     * solver, so its parameter types fail to resolve and fall back to source text.
+     * The result is a key like {@code #findById(Long)} against a node keyed
+     * {@code #findById(java.lang.Long)} — every edge into that method would
+     * dangle. Recomputing from the resolved signature has the mirror-image flaw:
+     * it throws for in-repo methods whose parameter types are third-party, which
+     * is precisely the case {@code functions[]} handles by falling back.
+     *
+     * <p>A position — absolute file path plus start line — is stable across both
+     * parses, so it identifies the same declaration in either.
      */
-    private Map<ObjectCreationExpr, String> anonymousNamesFor(com.github.javaparser.ast.Node ast) {
-        return ast.findCompilationUnit()
-                .map(cu -> anonymousNameCache.computeIfAbsent(cu, Declarations::anonymousClassNames))
-                .orElseGet(Map::of);
+    private Optional<String> indexedKey(Object resolvedDeclaration) {
+        if (!(resolvedDeclaration
+                instanceof com.github.javaparser.resolution.declarations.AssociableToAST associable)) {
+            return Optional.empty();
+        }
+        return associable
+                .toAst()
+                .flatMap(Declarations::positionOf)
+                .map(keyIndex::get)
+                .filter(java.util.Objects::nonNull);
     }
 
     private static void guard(Runnable action) {

@@ -35,12 +35,19 @@ final class FunctionExtractor {
     private FunctionExtractor() {}
 
     /** Per-file outcome. Errors are per-declaration, so one bad method costs only itself. */
-    record Result(List<ParsedFunction> functions, List<ParseError> errors, int unresolvedParamTypes) {}
+    record Result(
+            List<ParsedFunction> functions,
+            List<ParseError> errors,
+            int unresolvedParamTypes,
+            Map<String, String> keysByPosition) {}
 
     static Result fromCompilationUnit(
             CompilationUnit cu, String relativePath, Map<ObjectCreationExpr, String> anonymousNames) {
         List<ParsedFunction> functions = new ArrayList<>();
         List<ParseError> errors = new ArrayList<>();
+        // Position -> key, so edge extraction can reuse the exact key a node got
+        // rather than recomputing it under different resolution conditions.
+        Map<String, String> keysByPosition = new java.util.HashMap<>();
         int unresolvedParams = 0;
 
         for (CallableDeclaration<?> callable : cu.findAll(CallableDeclaration.class)) {
@@ -48,6 +55,7 @@ final class FunctionExtractor {
                 ParsedFunction fn = toFunction(callable, relativePath, anonymousNames);
                 functions.add(fn);
                 unresolvedParams += fn.unresolvedParamTypes();
+                Declarations.positionOf(callable).ifPresent(pos -> keysByPosition.put(pos, fn.key()));
             } catch (RuntimeException e) {
                 // One malformed declaration must not cost us the whole file.
                 errors.add(
@@ -61,7 +69,7 @@ final class FunctionExtractor {
                                         + e.getMessage()));
             }
         }
-        return new Result(functions, errors, unresolvedParams);
+        return new Result(functions, errors, unresolvedParams, keysByPosition);
     }
 
     private static ParsedFunction toFunction(

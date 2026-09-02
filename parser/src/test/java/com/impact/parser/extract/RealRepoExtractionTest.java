@@ -74,6 +74,39 @@ class RealRepoExtractionTest {
 
         result.parseErrors().forEach(e -> System.out.printf("  PARSE ERROR %s: %s%n", e.filePath(), e.message()));
 
+        System.out.println("  unresolved edges by reason:");
+        result.edges().stream()
+                .filter(e -> e.type() == EdgeType.UNRESOLVED)
+                .collect(Collectors.groupingBy(e -> String.valueOf(e.reason()), Collectors.counting()))
+                .entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .forEach(e -> System.out.printf("    %-24s %d%n", e.getKey(), e.getValue()));
+
+        long externalType = result.edges().stream()
+                .filter(e -> e.type() == EdgeType.UNRESOLVED)
+                .filter(e -> String.valueOf(e.reason()).equals("EXTERNAL_TYPE"))
+                .count();
+        long nonExternal = result.unresolvedEdges() - externalType;
+        System.out.printf(
+                "  SLICED: external_type %d (%.1f%% of edges) | NON-external unresolved %d (%.1f%% of edges)  <-- health signal%n",
+                externalType,
+                result.edges().isEmpty() ? 0.0 : externalType * 100.0 / result.edges().size(),
+                nonExternal,
+                result.edges().isEmpty() ? 0.0 : nonExternal * 100.0 / result.edges().size());
+
+        System.out.println("  sample @Override-bearing methods and their outgoing inheritance edges:");
+        result.functions().stream()
+                .filter(f -> f.hasAnnotation("Override"))
+                .limit(6)
+                .forEach(f -> {
+                    String kinds = result.edges().stream()
+                            .filter(e -> e.from().equals(f.key()))
+                            .filter(e -> e.type() == EdgeType.OVERRIDES || e.type() == EdgeType.IMPLEMENTS)
+                            .map(e -> e.type().wireName() + "->" + e.to())
+                            .collect(Collectors.joining(", "));
+                    System.out.printf("    %s  [%s]%n", f.key(), kinds.isEmpty() ? "NO INHERITANCE EDGE" : kinds);
+                });
+
         // The most common unresolved types tell us exactly what a classpath-aware
         // TypeSolver would buy — the D2 upgrade trigger, measured not guessed.
         Map<String, Long> unresolvedByType =
