@@ -84,8 +84,13 @@ Parser service (`/parser`, Java 21 + Maven):
 ```bash
 cd parser && mvn test                    # unit + regression tests
 cd parser && mvn package -DskipTests     # builds target/parser-0.1.0.jar
-cd parser && mvn spring-boot:run         # serves on :8080 (HTTP lands in M2 phase 7)
+cd parser && mvn spring-boot:run         # serves on :8080
 ```
+HTTP API (M2 phase 7): `POST /v1/parse`, `GET /v1/version`, `GET /healthz`, `GET /readyz`.
+**Kill the server before `mvn clean`** — Windows keeps the running jar's file handle
+open and `clean` will fail with "process cannot access the file". Find the real PID
+with `netstat -ano | grep ':8080'` (Git Bash's own `$!` PID is not the Windows PID
+for a backgrounded `java -jar`), then `taskkill //F //PID <pid>`.
 
 Parser CLI — point it at a repo and dump the §8 JSON (M2 phase 6). Any CLI flag
 selects one-shot mode; with none, the jar starts the web service:

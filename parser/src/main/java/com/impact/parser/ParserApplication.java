@@ -1,8 +1,10 @@
 package com.impact.parser;
 
+import com.impact.parser.api.ParserProperties;
 import com.impact.parser.cli.ParseCommand;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 /**
  * Entry point for the parser service.
@@ -20,6 +22,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * eyeballed on code we know, and the HTTP layer wraps it afterwards.
  */
 @SpringBootApplication
+@EnableConfigurationProperties(ParserProperties.class)
 public class ParserApplication {
 
     public static void main(String[] args) {
