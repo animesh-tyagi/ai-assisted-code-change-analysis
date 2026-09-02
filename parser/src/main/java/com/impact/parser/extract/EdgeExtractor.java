@@ -49,17 +49,33 @@ final class EdgeExtractor {
         int unresolvedCalls;
         int ambiguousOverloads;
         int failedDeclarations;
+        /**
+         * In-extraction-set targets whose key was not in the index, so it had to be
+         * recomputed from the resolved signature.
+         *
+         * <p>Should be zero in full mode. It can be non-zero in subset mode, where
+         * only touched files are indexed while a call may target an untouched one —
+         * a known gap, counted here so it is visible rather than silent, and to be
+         * closed when subset mode is exercised for real in phase 7.
+         */
+        int targetsMissingFromIndex;
         final List<String> ambiguousOverloadTargets = new ArrayList<>();
     }
 
     private final EdgeCollector collector;
     private final Stats stats;
     private final Map<String, String> keyIndex;
+    private final List<java.nio.file.Path> extractionRoots;
 
-    EdgeExtractor(EdgeCollector collector, Stats stats, Map<String, String> keyIndex) {
+    EdgeExtractor(
+            EdgeCollector collector,
+            Stats stats,
+            Map<String, String> keyIndex,
+            List<java.nio.file.Path> extractionRoots) {
         this.collector = collector;
         this.stats = stats;
         this.keyIndex = keyIndex;
+        this.extractionRoots = extractionRoots;
     }
 
     void extractFrom(
@@ -135,7 +151,7 @@ final class EdgeExtractor {
         CallSite site = siteOf(creation, relativePath);
         try {
             ResolvedConstructorDeclaration target = creation.resolve();
-            if (isInRepo(target)) {
+            if (isInExtractionSet(target)) {
                 collector.add(
                         fromKey, keyOfTarget(target), EdgeType.CALLS, false, Confidence.EXACT, site);
             } else {
@@ -161,7 +177,7 @@ final class EdgeExtractor {
 
     private void recordResolvedCall(
             ResolvedMethodDeclaration target, String fromKey, CallSite site, Confidence confidence) {
-        if (!isInRepo(target)) {
+        if (!isInExtractionSet(target)) {
             stats.externalCalls++;
             return;
         }
@@ -180,11 +196,21 @@ final class EdgeExtractor {
      * construction.
      */
     private String keyOfTarget(ResolvedMethodDeclaration target) {
-        return indexedKey(target).orElseGet(() -> NodeKeys.forMethod(target));
+        return indexedKey(target)
+                .orElseGet(
+                        () -> {
+                            stats.targetsMissingFromIndex++;
+                            return NodeKeys.forMethod(target);
+                        });
     }
 
     private String keyOfTarget(ResolvedConstructorDeclaration target) {
-        return indexedKey(target).orElseGet(() -> NodeKeys.forConstructor(target));
+        return indexedKey(target)
+                .orElseGet(
+                        () -> {
+                            stats.targetsMissingFromIndex++;
+                            return NodeKeys.forConstructor(target);
+                        });
     }
 
     /**
@@ -364,7 +390,7 @@ final class EdgeExtractor {
 
         for (ResolvedReferenceType ancestor : ancestors) {
             ResolvedReferenceTypeDeclaration ancestorType = ancestor.getTypeDeclaration().orElse(null);
-            if (ancestorType == null || !isInRepo(ancestorType)) {
+            if (ancestorType == null || !isInExtractionSet(ancestorType)) {
                 continue;
             }
             for (ResolvedMethodDeclaration candidate : declaredMethodsOf(ancestorType)) {
@@ -439,17 +465,35 @@ final class EdgeExtractor {
     // -----------------------------------------------------------------------
 
     /**
-     * Whether a resolved declaration comes from this repository's source.
+     * Whether a resolved target is in the <strong>extraction set</strong> — the
+     * files that become nodes (section 6.5, bucket 1).
      *
-     * <p>An AST backing means it was resolved by a {@code JavaParserTypeSolver}
-     * over a workspace source root; JDK and jar declarations have none. That is
-     * the discriminator between an in-repo edge and an external one.
+     * <p>Membership is decided by source location, not by whether the declaration
+     * has an AST. Those differ, and the difference is a real bug: generated
+     * sources are fed to the solver so hand-written code can resolve them, so they
+     * <em>do</em> have an AST — but they are not extracted, so an edge to one would
+     * point at a node that was never emitted. Location is the honest test.
+     *
+     * <p>A target under no extraction root is bucket 2: resolved, counted, not
+     * graphed. Nothing can act on a change to it, because it is either the JDK, a
+     * jar, or regenerated output.
      */
-    private static boolean isInRepo(Object declaration) {
-        if (declaration instanceof com.github.javaparser.resolution.declarations.AssociableToAST associable) {
-            return associable.toAst().isPresent();
+    private boolean isInExtractionSet(Object declaration) {
+        return sourcePathOf(declaration)
+                .map(path -> extractionRoots.stream().anyMatch(path::startsWith))
+                .orElse(false);
+    }
+
+    private static Optional<java.nio.file.Path> sourcePathOf(Object declaration) {
+        if (!(declaration
+                instanceof com.github.javaparser.resolution.declarations.AssociableToAST associable)) {
+            return Optional.empty();
         }
-        return false;
+        return associable
+                .toAst()
+                .flatMap(com.github.javaparser.ast.Node::findCompilationUnit)
+                .flatMap(CompilationUnit::getStorage)
+                .map(storage -> storage.getPath().toAbsolutePath().normalize());
     }
 
     private static CallSite siteOf(com.github.javaparser.ast.Node node, String relativePath) {

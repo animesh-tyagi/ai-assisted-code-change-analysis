@@ -7,8 +7,8 @@ import com.github.javaparser.symbolsolver.resolution.typesolvers.ReflectionTypeS
 import com.impact.parser.workspace.WorkspaceLayout;
 
 /**
- * v1 resolution: the repository's own source plus the JDK, and nothing else
- * (DECISIONS D2).
+ * v1 resolution: the analysed repository's own source plus the JDK, and nothing
+ * else (DECISIONS D2).
  *
  * <p>This covers the impact surface completely, because that surface is made of
  * intra-repo edges. Spring's implicit edges are matched by annotation name off
@@ -16,19 +16,34 @@ import com.impact.parser.workspace.WorkspaceLayout;
  * resolve is calls into third-party libraries — recorded as {@code unresolved:}
  * edges (section 6.5), never dropped.
  *
- * <p>A solver is built over <em>every</em> source root even when only a few files
- * are being extracted. That is deliberate and load-bearing for subset mode (D4):
- * the whole worktree is on disk, so a call from a touched file into an untouched
- * one still resolves; only the extraction is narrowed.
+ * <p>A solver is built over every <em>solver</em> root, which is a superset of the
+ * extraction roots: generated sources resolve without becoming nodes. It also
+ * spans the whole workspace even when only a few files are extracted, which is
+ * load-bearing for subset mode (D4) — a call from a touched file into an
+ * untouched one still resolves; only the extraction is narrowed.
  */
 public final class SourceAndJdkTypeSolverFactory implements TypeSolverFactory {
 
     @Override
     public TypeSolver create(WorkspaceLayout layout) {
         CombinedTypeSolver combined = new CombinedTypeSolver();
-        // The JDK first: it is the cheapest to consult and the most frequently hit.
-        combined.add(new ReflectionTypeSolver());
-        for (var sourceRoot : layout.sourceRoots()) {
+
+        // JRE_ONLY, stated explicitly rather than relying on the no-arg default.
+        //
+        // This is a correctness boundary, not a preference. ReflectionTypeSolver
+        // resolves through *this service's own* class loader, and this service is
+        // a Spring Boot app with ~19 Spring jars on its classpath. Constructed
+        // with ALL_CLASSES it would happily resolve the analysed repository's
+        // `org.springframework.*` calls — using our dependency versions, not
+        // theirs. Output would then depend on the parser's own classpath, which
+        // breaks the section 8 guarantee that a response is a pure function of
+        // (workspace, mode, files, options), and would silently change the graph
+        // whenever we bumped a dependency.
+        //
+        // Pinned by ReflectionTypeSolverScopeTest.
+        combined.add(new ReflectionTypeSolver(true));
+
+        for (var sourceRoot : layout.solverRoots()) {
             combined.add(new JavaParserTypeSolver(sourceRoot));
         }
         return combined;

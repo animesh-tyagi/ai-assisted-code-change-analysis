@@ -1,6 +1,7 @@
 package com.impact.parser.extract;
 
 import com.impact.parser.graph.GraphEdge;
+import com.impact.parser.graph.UnresolvedReason;
 import com.impact.parser.graph.ParsedFunction;
 import java.util.List;
 
@@ -39,13 +40,33 @@ public record ExtractionResult(
     }
 
     /**
-     * {@code unresolvedEdges / totalEdges} — the health metric of section 6.5.
+     * {@code unresolvedEdges / totalEdges} (section 6.5).
      *
-     * <p>A spike means the analysis quietly got worse. It counts only calls we
-     * <em>failed</em> to bind, not calls we deliberately left out of the graph as
-     * external, so it stays a measure of blindness rather than of scope.
+     * <p>Diagnostic, not an alerting metric: it is dominated by
+     * {@code external_type}, which is expected under source+JDK resolution.
+     * petclinic-rest measures above 50% while its non-external rate is zero.
+     * Read it as the D2 upgrade trigger.
      */
     public double unresolvedRate() {
         return edges.isEmpty() ? 0.0 : (double) unresolvedEdges() / edges.size();
+    }
+
+    /** Unresolved edges that are <em>not</em> merely external types. */
+    public long nonExternalUnresolvedEdges() {
+        return edges.stream()
+                .filter(GraphEdge::isUnresolved)
+                .filter(e -> e.reason() != UnresolvedReason.EXTERNAL_TYPE)
+                .count();
+    }
+
+    /**
+     * The health signal that alerts (section 6.5).
+     *
+     * <p>A rise means genuine blindness — an in-repo call we failed to bind, an
+     * overload we could not disambiguate, a file that would not parse. Zero in
+     * both validation repos today.
+     */
+    public double nonExternalUnresolvedRate() {
+        return edges.isEmpty() ? 0.0 : (double) nonExternalUnresolvedEdges() / edges.size();
     }
 }

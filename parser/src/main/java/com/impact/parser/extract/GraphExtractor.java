@@ -79,7 +79,7 @@ public final class GraphExtractor {
         EdgeCollector collector = new EdgeCollector();
         EdgeExtractor.Stats stats = new EdgeExtractor.Stats();
         Map<String, String> keyIndexRef = new HashMap<>();
-        EdgeExtractor edgeExtractor = new EdgeExtractor(collector, stats, keyIndexRef);
+        EdgeExtractor edgeExtractor = new EdgeExtractor(collector, stats, keyIndexRef, layout.extractionRoots());
 
         int filesParsed = 0;
         int unresolvedParams = 0;

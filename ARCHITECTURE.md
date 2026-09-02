@@ -241,13 +241,47 @@ extract referenced names by regex from the JPQL/native string and mark
 `@RabbitListener`, `@JmsListener`, `@EventListener` → `message_listener`
 surface. Both connect via `triggers`.
 
-### 6.5 Unresolved edges
+### 6.5 Unresolved and external calls
 
-Any call site SymbolSolver cannot bind becomes an edge to an `unresolved:` node
-carrying the best available textual target and a `reason` (`external_type`,
-`ambiguous_overload`, `parse_error`, `missing_source`).
-`unresolvedRate = unresolvedEdges / totalEdges` is tracked per graph version and
-surfaced as a health metric — a spike means the analysis quietly got worse.
+Every call site has exactly one of three outcomes, decided by whether its
+resolved target is **in the extraction set** — the files this run turns into
+nodes. The three are never conflated.
+
+1. **Target is in the extraction set** → a `calls` edge. This is the impact
+   surface.
+2. **Target resolves but is outside the extraction set** → no edge; counted in
+   `diagnostics.externalCalls`. Two things land here: the JDK and third-party
+   jars, and **solver-only roots** — generated sources that are fed to the type
+   solver so hand-written code can resolve them, but which are never extracted
+   (see §8, source roots). Nothing here can carry impact: you cannot change
+   `java.util.HashMap`, and generated code changes only when its generator does.
+   Excluded by *scope*, not by failure.
+3. **Target cannot be bound at all** → an edge to an `unresolved:` node carrying
+   the best available textual target and a `reason` (`external_type`,
+   `ambiguous_overload`, `parse_error`, `missing_source`). Never dropped.
+
+Membership in (1) is decided by **source location**, not by whether the resolved
+declaration has an AST. Those differ: generated sources have an AST and still
+must not be graphed, or an edge would point at a node that was never emitted.
+
+Node keys follow the same split. An in-set target reuses the key `functions[]`
+already assigned it, looked up by source position rather than recomputed —
+recomputation is not safe, because the AST reachable from a resolved declaration
+comes from the type solver's own parse, which carries no symbol resolver and so
+names types differently. An unbindable target gets a textual `unresolved:` key.
+An out-of-set target gets no node at all.
+
+**Two rates, and only one of them alerts.**
+
+- `unresolvedRate = unresolvedEdges / totalEdges` is the headline figure, but it
+  is dominated by `external_type`, which under source+JDK resolution (D2) is
+  expected and benign. petclinic-rest measures 52.3%, essentially all of it
+  third-party Spring. Read it as the **D2 upgrade trigger**: when it grows
+  large enough to degrade explanations, classpath resolution is the fix.
+- `nonExternalUnresolvedRate` — everything except `external_type` — is the
+  **health signal**. It is 0.0% in both validation repos today. A rise means
+  genuine blindness: an in-repo call we failed to bind, an overload we could not
+  disambiguate, a file that would not parse. This is the one that alerts.
 
 ### 6.6 Known limitation: overload resolution
 
@@ -289,7 +323,11 @@ Index: `{ provider: 1, githubRepoId: 1 }` unique.
 { _id, repoId, sha, kind: "branch" | "pr_overlay",
   status: "building" | "ready" | "failed" | "superseded",
   parserVersion, ruleVersion,
-  stats: { functions, edges, surfaces, unresolvedRate, parseErrors },
+  stats: { functions, edges, surfaces,
+           unresolvedRate,              // all unresolved edges / total edges
+           nonExternalUnresolvedRate,   // excludes external_type — the alerting metric (§6.5)
+           externalCalls,               // resolved but outside the extraction set; not graphed
+           parseErrors },
   pinnedBy: [analysisId], startedAt, completedAt, error }
 ```
 `parserVersion` + `ruleVersion` are stored so a parser upgrade can invalidate
@@ -800,8 +838,11 @@ before the graph does.**
 
 ## 14. Metrics
 
-*Graph quality:* `unresolvedRate`, ambiguous-edge rate, parse errors per index,
-node and edge counts per version.
+*Graph quality:* **`nonExternalUnresolvedRate`** (the alerting metric — see §6.5),
+`unresolvedRate` and `externalCalls` (diagnostic, not alerting: they measure how
+much of the program is outside the extraction set, which is the D2 upgrade
+trigger), ambiguous-edge rate, parse errors per index, node and edge counts per
+version.
 
 *Pipeline:* webhook ack latency p50/p99 (against the 10s budget), queue depth and
 wait time, parse duration, end-to-end push→ready and PR→ready latency.
@@ -812,8 +853,13 @@ actually governs cost here; a low hit rate, not a caching flag, is what to watch
 and tokens per analysis from Gemini's `usageMetadata`
 (`promptTokenCount` / `candidatesTokenCount`).
 
-`unresolvedRate` and the validator rejection rate are the two that indicate the
-product is quietly getting worse. They should alert.
+`nonExternalUnresolvedRate` and the validator rejection rate are the two that
+indicate the product is quietly getting worse. They should alert.
+
+`unresolvedRate` deliberately does **not** alert. It is dominated by
+`external_type`, which is expected under source+JDK resolution — petclinic-rest
+sits above 50% while its non-external rate is 0.0%. Alerting on it would train
+everyone to ignore the alert.
 
 ---
 

@@ -4,18 +4,23 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Finds the Java source roots in a workspace.
+ * Finds the Java source roots in a workspace, split by what they are for.
  *
  * <p>Discovers every {@code **}{@code /src/main/java} directory rather than
  * assuming one at the top. That covers multi-module builds for free: each root
  * gets its own {@code JavaParserTypeSolver}, so cross-module calls resolve. Both
  * current validation repos are single-module, where this is simply a no-op
  * generalisation (BUILD_PLAN Step 0, Q3).
+ *
+ * <p>Roots found <em>under a build-output directory</em> are handed to the solver
+ * but not to extraction — see {@link WorkspaceLayout} for why generated sources
+ * need to resolve without becoming nodes.
  *
  * <p>Test sources are excluded by default (Q2). Including them is a per-request
  * option so that "which tests cover this change" stays available later without a
@@ -25,6 +30,15 @@ public final class SourceRootDiscovery {
 
     private static final String MAIN_JAVA = "src/main/java";
     private static final String TEST_JAVA = "src/test/java";
+
+    /**
+     * Directories that hold build output rather than hand-written source.
+     *
+     * <p>A source root under one of these is generated: it resolves, but it is not
+     * in git, and its node keys would shift every time the generator runs.
+     */
+    private static final List<String> BUILD_OUTPUT_DIRS =
+            List.of("target", "build", "out", "bin", "node_modules", ".git", ".gradle", ".mvn");
 
     private SourceRootDiscovery() {}
 
@@ -39,47 +53,47 @@ public final class SourceRootDiscovery {
         if (!Files.isDirectory(workspaceRoot)) {
             throw new IllegalArgumentException("workspace path is not a directory: " + workspaceRoot);
         }
-
-        List<Path> roots = findRoots(workspaceRoot, includeTestSources);
-        if (roots.isEmpty()) {
-            throw new NoSourceRootsException(workspaceRoot);
-        }
-        return new WorkspaceLayout(workspaceRoot.toAbsolutePath().normalize(), roots);
-    }
-
-    private static List<Path> findRoots(Path workspaceRoot, boolean includeTestSources) {
         Path normalised = workspaceRoot.toAbsolutePath().normalize();
-        try (Stream<Path> walk = Files.walk(normalised)) {
-            return walk.filter(Files::isDirectory)
-                    .filter(dir -> matchesSourceRoot(normalised, dir, includeTestSources))
-                    // Sorted so the solver is constructed identically every run —
-                    // filesystem walk order is not guaranteed and would otherwise
-                    // leak nondeterminism into resolution.
-                    .sorted(Comparator.comparing(Path::toString))
-                    .toList();
+
+        List<Path> extractionRoots = new ArrayList<>();
+        List<Path> solverRoots = new ArrayList<>();
+
+        for (Path dir : allDirectories(normalised)) {
+            String relative = relativeOf(normalised, dir);
+            if (!isSourceRoot(relative, includeTestSources)) {
+                continue;
+            }
+            solverRoots.add(dir);
+            if (!isUnderBuildOutput(relative)) {
+                extractionRoots.add(dir);
+            }
+        }
+
+        if (extractionRoots.isEmpty()) {
+            throw new NoSourceRootsException(normalised);
+        }
+
+        // Sorted so the solver is constructed identically every run — filesystem
+        // walk order is not guaranteed and would otherwise leak nondeterminism
+        // into resolution itself.
+        extractionRoots.sort(Comparator.comparing(Path::toString));
+        solverRoots.sort(Comparator.comparing(Path::toString));
+        return new WorkspaceLayout(normalised, List.copyOf(extractionRoots), List.copyOf(solverRoots));
+    }
+
+    private static List<Path> allDirectories(Path workspaceRoot) {
+        try (Stream<Path> walk = Files.walk(workspaceRoot)) {
+            return walk.filter(Files::isDirectory).toList();
         } catch (IOException e) {
-            throw new UncheckedIOException("failed to scan " + normalised, e);
+            throw new UncheckedIOException("failed to scan " + workspaceRoot, e);
         }
     }
 
-    /**
-     * Directories that hold build output rather than source.
-     *
-     * <p>Skipping these is not tidiness. petclinic-rest generates OpenAPI
-     * interfaces into {@code target/generated-sources/openapi/src/main/java},
-     * which matches the source-root pattern exactly — so without this the parser
-     * indexed generated code that is not in git, inflating the graph with nodes
-     * no commit can ever change and no reviewer would recognise.
-     */
-    private static final List<String> BUILD_OUTPUT_DIRS =
-            List.of("target", "build", "out", "bin", "node_modules", ".git", ".gradle", ".mvn");
+    private static String relativeOf(Path workspaceRoot, Path dir) {
+        return workspaceRoot.relativize(dir).toString().replace(WorkspaceLayout.WINDOWS_SEPARATOR, '/');
+    }
 
-    private static boolean matchesSourceRoot(Path workspaceRoot, Path dir, boolean includeTestSources) {
-        String relative =
-                workspaceRoot.relativize(dir).toString().replace(WorkspaceLayout.WINDOWS_SEPARATOR, '/');
-        if (isUnderBuildOutput(relative)) {
-            return false;
-        }
+    private static boolean isSourceRoot(String relative, boolean includeTestSources) {
         if (relative.equals(MAIN_JAVA) || relative.endsWith("/" + MAIN_JAVA)) {
             return true;
         }
@@ -95,9 +109,14 @@ public final class SourceRootDiscovery {
         return false;
     }
 
-    /** Every {@code .java} file under the given roots, sorted for determinism. */
+    /**
+     * Every {@code .java} file that should become nodes and edges.
+     *
+     * <p>Reads {@code extractionRoots} only: generated sources resolve but are
+     * never extracted.
+     */
     public static List<Path> javaFiles(WorkspaceLayout layout) {
-        return layout.sourceRoots().stream()
+        return layout.extractionRoots().stream()
                 .flatMap(SourceRootDiscovery::walkJavaFiles)
                 .distinct()
                 .sorted(Comparator.comparing(Path::toString))

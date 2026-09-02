@@ -67,7 +67,7 @@ class FunctionExtractorTest {
 
             WorkspaceLayout layout = SourceRootDiscovery.discover(tempDir, false);
 
-            assertThat(layout.relativeSourceRoots()).containsExactly("src/main/java");
+            assertThat(layout.relativeExtractionRoots()).containsExactly("src/main/java");
         }
 
         @Test
@@ -76,9 +76,9 @@ class FunctionExtractorTest {
             writeSource("src/main/java/com/acme/A.java", "package com.acme; class A {}");
             writeSource("src/test/java/com/acme/ATest.java", "package com.acme; class ATest {}");
 
-            assertThat(SourceRootDiscovery.discover(tempDir, false).relativeSourceRoots())
+            assertThat(SourceRootDiscovery.discover(tempDir, false).relativeExtractionRoots())
                     .containsExactly("src/main/java");
-            assertThat(SourceRootDiscovery.discover(tempDir, true).relativeSourceRoots())
+            assertThat(SourceRootDiscovery.discover(tempDir, true).relativeExtractionRoots())
                     .containsExactly("src/main/java", "src/test/java");
         }
 
@@ -89,8 +89,52 @@ class FunctionExtractorTest {
             writeSource("core/src/main/java/com/acme/A.java", "package com.acme; class A {}");
             writeSource("web/src/main/java/com/acme/B.java", "package com.acme; class B {}");
 
-            assertThat(SourceRootDiscovery.discover(tempDir, false).relativeSourceRoots())
+            assertThat(SourceRootDiscovery.discover(tempDir, false).relativeExtractionRoots())
                     .containsExactly("core/src/main/java", "web/src/main/java");
+        }
+
+        @Test
+        void generatedSourcesResolveButAreNotExtracted() throws IOException {
+            // petclinic generates its DTOs into
+            // target/generated-sources/openapi/src/main/java. Indexing them would
+            // create nodes for code that is not in git and whose keys shift on every
+            // generator run; excluding them from the *solver* would instead leave
+            // hand-written code unable to resolve types it genuinely depends on.
+            // Solver roots are therefore a superset of extraction roots.
+            writeSource(
+                    "target/generated-sources/openapi/src/main/java/com/acme/dto/OwnerDto.java",
+                    "package com.acme.dto; public class OwnerDto { public String name() { return \"x\"; } }");
+            writeSource(
+                    "src/main/java/com/acme/Ctrl.java",
+                    """
+                    package com.acme;
+                    import com.acme.dto.OwnerDto;
+                    class Ctrl {
+                        String show(OwnerDto dto) { return dto.name(); }
+                    }
+                    """);
+
+            WorkspaceLayout layout = SourceRootDiscovery.discover(tempDir, false);
+
+            assertThat(layout.relativeExtractionRoots()).containsExactly("src/main/java");
+            assertThat(layout.relativeSolverOnlyRoots())
+                    .containsExactly("target/generated-sources/openapi/src/main/java");
+
+            ExtractionResult result = extractAll();
+
+            // No node for the generated DTO...
+            assertThat(result.functions())
+                    .extracting(ParsedFunction::fqcn)
+                    .doesNotContain("com.acme.dto.OwnerDto");
+            // ...but the hand-written method resolved its parameter type properly,
+            // so it is not degraded to an unresolved name.
+            assertThat(byMethodName(result, "show").paramTypes())
+                    .containsExactly("com.acme.dto.OwnerDto");
+            assertThat(byMethodName(result, "show").unresolvedParamTypes()).isZero();
+            // The call into generated code is out-of-set: counted, not graphed,
+            // and not mistaken for a resolution failure (section 6.5 bucket 2).
+            assertThat(result.externalCalls()).isPositive();
+            assertThat(result.unresolvedEdges()).isZero();
         }
 
         @Test
