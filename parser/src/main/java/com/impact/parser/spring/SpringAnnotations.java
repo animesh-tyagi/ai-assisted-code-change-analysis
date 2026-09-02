@@ -126,19 +126,56 @@ public final class SpringAnnotations {
      * constant is looked up on the type that declares the annotated method, which
      * is where generated code puts it.
      */
-    public static String resolveConstants(BodyDeclaration<?> declaringMember, String value) {
-        if (value == null || value.isBlank() || value.startsWith("/")) {
-            return value;
+    /**
+     * A resolved path plus whether it is trustworthy enough to key a route on.
+     *
+     * @param exact false when the value could not be fully evaluated, in which
+     *     case {@code value} is the verbatim source text
+     */
+    public record PathValue(String value, boolean exact) {}
+
+    /**
+     * Resolves a constant reference in an annotation value to its string literal.
+     *
+     * <p>Generated OpenAPI interfaces write
+     * {@code @RequestMapping(value = OwnersApi.PATH_DELETE_OWNER)} rather than an
+     * inline path. Left unresolved, every petclinic route key would read
+     * {@code /api/OwnersApi.PATH_DELETE_OWNER} — the right count of routes with
+     * none of the right paths, which is worse than useless in an explanation.
+     *
+     * <p>Unlike a {@code ${property}} placeholder, a {@code static final String} is
+     * statically knowable, so resolving it is exact rather than a guess.
+     *
+     * <p><strong>All or nothing.</strong> A value that cannot be fully evaluated —
+     * a concatenation, or a constant whose initialiser is not a plain literal — is
+     * returned verbatim and marked inexact, never partially substituted. A
+     * half-resolved path like {@code /api/} + an unresolved tail looks like a real
+     * endpoint and would key a route nobody can find, which is a worse failure
+     * than an honestly ambiguous one.
+     */
+    public static PathValue resolveConstants(BodyDeclaration<?> declaringMember, String value) {
+        if (value == null || value.isBlank()) {
+            return new PathValue(value == null ? "" : value, true);
         }
-        // Bare identifier, or Type.CONSTANT — take the last segment as the field.
+        // A literal path is already exact.
+        if (value.startsWith("/")) {
+            return new PathValue(value, true);
+        }
+        // A concatenation cannot be evaluated from one field lookup. Refuse rather
+        // than substitute the half we can see.
+        if (value.contains("+")) {
+            return new PathValue(value, false);
+        }
         String fieldName = value.contains(".") ? value.substring(value.lastIndexOf('.') + 1) : value;
         if (!fieldName.matches("[A-Z][A-Z0-9_]*")) {
-            return value; // not a constant-shaped name; leave it as written
+            // Not constant-shaped: an expression we do not model. Verbatim, inexact.
+            return new PathValue(value, false);
         }
         return declaringMember
                 .findAncestor(TypeDeclaration.class)
                 .flatMap(type -> constantValue(type, fieldName))
-                .orElse(value);
+                .map(resolved -> new PathValue(resolved, true))
+                .orElseGet(() -> new PathValue(value, false));
     }
 
     private static Optional<String> constantValue(TypeDeclaration<?> type, String fieldName) {

@@ -52,6 +52,7 @@ class RealRepoExtractionTest {
                         + "  functions           : %d%n"
                         + "  unresolved params   : %d (%.1f%% of all parameters)%n"
                         + "  edges               : %d  (calls %d, implements %d, overrides %d, unresolved %d)%n"
+                        + "                        (handles %d, triggers %d, queries %d, maps_to %d)%n"
                         + "  unresolvedRate      : %.1f%%  [section 6.5 health metric]%n"
                         + "  external calls      : %d  (resolved but out of scope, not graphed)%n"
                         + "  ambiguous overloads : %d%n"
@@ -67,6 +68,10 @@ class RealRepoExtractionTest {
                 countOf(result, EdgeType.IMPLEMENTS),
                 countOf(result, EdgeType.OVERRIDES),
                 countOf(result, EdgeType.UNRESOLVED),
+                countOf(result, EdgeType.HANDLES),
+                countOf(result, EdgeType.TRIGGERS),
+                countOf(result, EdgeType.QUERIES),
+                countOf(result, EdgeType.MAPS_TO),
                 result.unresolvedRate() * 100,
                 result.externalCalls(),
                 result.ambiguousOverloads().size(),
@@ -185,6 +190,49 @@ class RealRepoExtractionTest {
         assertThat(result.functions())
                 .as("Spring Data repository methods")
                 .anyMatch(f -> f.fqcn().contains("springdatajpa"));
+    }
+
+    @Test
+    @DisplayName("petclinic: entity reverse-reaches a controller and its route (composition)")
+    void springDataComposesOnRealCode() {
+        Path repo = repoFromProperty("validation.petclinic");
+        ExtractionResult result = extract(repo);
+
+        // The acceptance criterion is composition, not edge count: a healthy
+        // queries count proves nothing if the edges hang off a marker interface
+        // that no caller resolves to. Walk it on the real repository.
+        String entity = "entity:org.springframework.samples.petclinic.model.Owner";
+        java.util.Set<String> reachable = new java.util.HashSet<>();
+        java.util.Deque<String> queue = new java.util.ArrayDeque<>();
+        queue.add(entity);
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (var edge : result.edges()) {
+                if (edge.to().equals(current) && reachable.add(edge.from())) {
+                    queue.add(edge.from());
+                }
+            }
+        }
+
+        System.out.printf("%n  COMPOSITION from %s: %d nodes reverse-reachable%n", entity, reachable.size());
+        reachable.stream()
+                .filter(k -> k.startsWith("route:"))
+                .sorted()
+                .limit(4)
+                .forEach(k -> System.out.printf("    reaches %s%n", k));
+
+        assertThat(reachable)
+                .as("a repository method that queries the entity")
+                .anyMatch(k -> k.contains("OwnerRepository#"));
+        assertThat(reachable)
+                .as("the service layer between repository and controller")
+                .anyMatch(k -> k.contains("ClinicService"));
+        assertThat(reachable)
+                .as("a controller — two calls hops from the repository")
+                .anyMatch(k -> k.contains("RestController"));
+        assertThat(reachable)
+                .as("and the route surface reverse traversal collapses to")
+                .anyMatch(k -> k.startsWith("route:"));
     }
 
     @Test

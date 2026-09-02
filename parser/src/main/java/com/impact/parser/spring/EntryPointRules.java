@@ -166,10 +166,10 @@ public final class EntryPointRules {
             String methodKey,
             CallSite site,
             boolean inherited) {
-        String methodPath =
+        SpringAnnotations.PathValue methodPath =
                 SpringAnnotations.resolveConstants(
                         declaringMember, SpringAnnotations.firstValue(mapping).orElse(""));
-        String path = SpringAnnotations.joinPaths(classPath, methodPath);
+        String path = SpringAnnotations.joinPaths(classPath, methodPath.value());
         String key = "route:" + verb + " " + path;
 
         Map<String, String> attrs = new LinkedHashMap<>();
@@ -183,7 +183,8 @@ public final class EntryPointRules {
         // call. Inheriting the mapping does not lower confidence: the annotation
         // was read from a real declaration, not guessed at. Only an unresolved
         // ${property} placeholder does.
-        Confidence confidence = path.contains("${") ? Confidence.AMBIGUOUS : Confidence.EXACT;
+        boolean uncertain = path.contains("${") || !methodPath.exact();
+        Confidence confidence = uncertain ? Confidence.AMBIGUOUS : Confidence.EXACT;
         edges.add(key, methodKey, EdgeType.HANDLES, true, confidence, site);
     }
 

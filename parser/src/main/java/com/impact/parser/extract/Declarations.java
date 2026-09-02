@@ -119,6 +119,30 @@ final class Declarations {
         return NodeKeys.format(owner.fqcn(), methodName, paramTypesOf(callable));
     }
 
+    /**
+     * The key {@code functions[]} gave this declaration, by source position, with
+     * AST derivation only as a fallback.
+     *
+     * <p><strong>Prefer this over {@link #keyOf} for any declaration that might
+     * have come from the type solver.</strong> {@code toAst()} returns nodes from
+     * {@code JavaParserTypeSolver}'s internal parse, which carries no symbol
+     * resolver — so recomputing a key there silently produces
+     * {@code #findByLastName(String)} against a node keyed
+     * {@code #findByLastName(java.lang.String)}, and every edge into that method
+     * dangles. This has now caused the same bug twice (edge targets, then Spring
+     * Data {@code queries}); looking the key up removes the trap rather than
+     * relying on remembering it.
+     */
+    static String keyOfIndexed(
+            CallableDeclaration<?> callable,
+            Map<String, String> keyIndex,
+            Map<ObjectCreationExpr, String> anonymousNames) {
+        return positionOf(callable)
+                .map(keyIndex::get)
+                .filter(java.util.Objects::nonNull)
+                .orElseGet(() -> keyOf(callable, anonymousNames));
+    }
+
     /** Erased parameter types, with the varargs normalisation the key format requires. */
     static List<String> paramTypesOf(CallableDeclaration<?> callable) {
         return callable.getParameters().stream()

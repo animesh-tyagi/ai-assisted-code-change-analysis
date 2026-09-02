@@ -11,6 +11,9 @@ import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.impact.parser.graph.EdgeCollector;
 import com.impact.parser.graph.SurfaceCollector;
 import com.impact.parser.spring.EntryPointRules;
+import com.impact.parser.spring.InterfaceDispatchRules;
+import com.impact.parser.spring.SpringAnnotations;
+import com.impact.parser.spring.SpringDataRules;
 import com.impact.parser.graph.ParsedFunction;
 import com.impact.parser.workspace.WorkspaceLayout;
 import java.io.IOException;
@@ -125,6 +128,13 @@ public final class GraphExtractor {
         }
 
         EntryPointRules entryPoints = new EntryPointRules(collector, surfaces);
+        SpringDataRules springData = new SpringDataRules(collector, surfaces);
+        // Entity declarations must all be known before any repository is resolved,
+        // since the entity commonly lives in a different file from its repository.
+        parsed.forEach(file -> springData.indexTypes(file.cu()));
+
+        java.util.Set<String> primaryKeys = new java.util.HashSet<>();
+        java.util.Set<String> qualifiedKeys = new java.util.HashSet<>();
 
         for (ParsedFile file : parsed) {
             try {
@@ -135,7 +145,16 @@ public final class GraphExtractor {
                 entryPoints.apply(
                         file.cu(),
                         file.relativePath(),
-                        method -> Declarations.keyOf(method, file.anonymousNames()));
+                        method ->
+                                Declarations.keyOfIndexed(
+                                        method, keyIndexRef, file.anonymousNames()));
+                springData.apply(
+                        file.cu(),
+                        file.relativePath(),
+                        method ->
+                                Declarations.keyOfIndexed(
+                                        method, keyIndexRef, file.anonymousNames()));
+                collectSelectors(file, primaryKeys, qualifiedKeys);
             } catch (RuntimeException e) {
                 // Edge extraction failing must not cost us the file's nodes.
                 errors.add(
@@ -147,6 +166,10 @@ public final class GraphExtractor {
                                         + e.getMessage()));
             }
         }
+
+        // Interface dispatch is derived from the implements edges already
+        // gathered, so it runs once at the end rather than re-walking the source.
+        new InterfaceDispatchRules(collector).apply(collector.toList(), primaryKeys, qualifiedKeys);
 
         functions.sort(Comparator.comparing(ParsedFunction::key));
         errors.sort(Comparator.comparing(ParseError::filePath).thenComparing(ParseError::message));
@@ -161,6 +184,32 @@ public final class GraphExtractor {
                 unresolvedParams,
                 stats.externalCalls,
                 ambiguous);
+    }
+
+    /**
+     * Records methods whose declaring class carries {@code @Primary} or
+     * {@code @Qualifier}, so interface dispatch can narrow candidates. The
+     * annotations sit on the class, but selection happens per method.
+     */
+    private static void collectSelectors(
+            ParsedFile file, java.util.Set<String> primaryKeys, java.util.Set<String> qualifiedKeys) {
+        for (var type :
+                file.cu().findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)) {
+            boolean primary = SpringAnnotations.has(type, SpringAnnotations.PRIMARY);
+            boolean qualified = SpringAnnotations.has(type, SpringAnnotations.QUALIFIER);
+            if (!primary && !qualified) {
+                continue;
+            }
+            for (var method : type.getMethods()) {
+                String key = Declarations.keyOf(method, file.anonymousNames());
+                if (primary) {
+                    primaryKeys.add(key);
+                }
+                if (qualified) {
+                    qualifiedKeys.add(key);
+                }
+            }
+        }
     }
 
     /** One parsed file, retained between the two passes. */
