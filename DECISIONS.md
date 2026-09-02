@@ -325,3 +325,37 @@ fixtures, which is exactly what the "no toy examples" convention exists to preve
 — the alerting metric — stays 0 and nothing looks broken.
 **Roadmap trigger:** a validation repo that calls inherited CRUD
 (`save`/`findById`/`findAll`/…) on a reference typed as the Spring Data interface.
+
+
+---
+
+## Route inheritance from implemented interfaces (M2 phase 5)
+
+### A controller inherits its route mapping from any interface it implements
+**Chose:** when a controller method declares no method-level mapping, take it from the
+corresponding method on any implemented or overridden interface — in-repo **or**
+solver-only, including OpenAPI-generated API interfaces under `target/generated-sources`
+— concatenated with the controller's own class-level mapping. The surface and `handles`
+edge attach to the in-repo controller method; the generated interface gets no node.
+**Why:** measured. `spring-petclinic-rest` yielded **1 route** before this and **37**
+after — exactly the 37 endpoints its OpenAPI spec declares. Its controllers carry only
+`@RequestMapping("/api")`; every method-level mapping lives on the generated interface.
+Without inheritance the route rule is near-useless wherever OpenAPI codegen is used, and
+a controller method with no route surface looks dead — so a change to it would appear to
+affect nobody, the exact failure this product exists to prevent.
+**Confirmed mechanism:** annotations are readable off an AST reached through the type
+solver even though that parse carries no symbol resolver, because annotations are matched
+by *name* off the raw AST (D2) and need no resolution at all. Pinned by a test built on
+the generated-interface shape.
+**Two corrections the real repos forced:**
+- A mapping on an *interface* method emits no surface of its own. Spring serves a route
+  only through a concrete request-handling bean; emitting one represented a single
+  endpoint twice — unprefixed on the interface, prefixed on the controller — which would
+  inflate the entry-point count reverse traversal reports.
+- Constant paths (`value = OwnersApi.PATH_DELETE_OWNER`) are resolved to their string
+  initialiser. A `static final String` is statically knowable, unlike a `${property}`
+  placeholder, which stays verbatim and `ambiguous`. Before this the route *count* was
+  right and every *path* was wrong — worse than useless in an explanation.
+**Interview line:** "PetClinic's routes live on OpenAPI-generated interfaces, not on the
+controllers — so I inherit the mapping through the type hierarchy and attach the route to
+the hand-written method. That took the route count from 1 to the full 37 the spec declares."

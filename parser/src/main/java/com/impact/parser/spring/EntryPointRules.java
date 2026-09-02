@@ -52,7 +52,7 @@ public final class EntryPointRules {
             for (MethodDeclaration method : type.getMethods()) {
                 String methodKey = keyOf.apply(method);
                 CallSite site = new CallSite(relativePath, method.getBegin().map(p -> p.line).orElse(0));
-                httpRoute(method, classPath, methodKey, site);
+                httpRoute(type, method, classPath, methodKey, site);
                 scheduledJob(method, methodKey, site);
                 messageListener(method, methodKey, site);
             }
@@ -69,20 +69,74 @@ public final class EntryPointRules {
                 .orElse("");
     }
 
-    private void httpRoute(MethodDeclaration method, String classPath, String methodKey, CallSite site) {
-        for (var entry : SpringAnnotations.HTTP_MAPPINGS.entrySet()) {
-            Optional<AnnotationExpr> mapping = SpringAnnotations.find(method, entry.getKey());
-            if (mapping.isPresent()) {
-                emitRoute(entry.getValue(), classPath, mapping.get(), methodKey, site);
+    private void httpRoute(
+            ClassOrInterfaceDeclaration type,
+            MethodDeclaration method,
+            String classPath,
+            String methodKey,
+            CallSite site) {
+        // A mapping on an interface method is a declaration to be inherited, not a
+        // route in its own right: Spring serves a route only through a concrete
+        // request-handling bean. Emitting one here would represent a single
+        // endpoint as two surfaces — once unprefixed on the interface, once
+        // properly prefixed on the controller — and inflate the entry-point count
+        // that reverse traversal reports.
+        if (type.isInterface()) {
+            return;
+        }
+        if (emitFrom(method, classPath, methodKey, site, false)) {
+            return;
+        }
+        // Inherited mapping. A controller may declare no mapping of its own and
+        // implement an interface that carries it — the OpenAPI-generated API
+        // interfaces petclinic uses put every method-level @RequestMapping there,
+        // under target/generated-sources. Spring still serves those routes against
+        // this controller method, so the route is real; only its declaration site
+        // is generated. Reading it needs no node for the generated interface.
+        for (MethodDeclaration inherited : Supertypes.correspondingMethods(type, method)) {
+            if (emitFrom(inherited, classPath, methodKey, site, true)) {
                 return;
             }
         }
+    }
+
+    /**
+     * Emits a route from whichever declaration carries the mapping.
+     *
+     * <p>The path always concatenates <em>this controller's</em> class-level
+     * mapping with the method-level one, even when the latter was inherited: the
+     * class-level prefix belongs to the implementing controller, not to the
+     * interface.
+     */
+    private boolean emitFrom(
+            MethodDeclaration declaration,
+            String classPath,
+            String methodKey,
+            CallSite site,
+            boolean inherited) {
+        for (var entry : SpringAnnotations.HTTP_MAPPINGS.entrySet()) {
+            Optional<AnnotationExpr> mapping = SpringAnnotations.find(declaration, entry.getKey());
+            if (mapping.isPresent()) {
+                emitRoute(
+                        entry.getValue(), classPath, mapping.get(), declaration, methodKey, site, inherited);
+                return true;
+            }
+        }
         // @RequestMapping on a method carries its verb in `method = RequestMethod.GET`.
-        SpringAnnotations.find(method, SpringAnnotations.REQUEST_MAPPING)
-                .ifPresent(
-                        annotation ->
-                                emitRoute(
-                                        verbOf(annotation), classPath, annotation, methodKey, site));
+        Optional<AnnotationExpr> requestMapping =
+                SpringAnnotations.find(declaration, SpringAnnotations.REQUEST_MAPPING);
+        if (requestMapping.isPresent()) {
+            emitRoute(
+                    verbOf(requestMapping.get()),
+                    classPath,
+                    requestMapping.get(),
+                    declaration,
+                    methodKey,
+                    site,
+                    inherited);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -105,8 +159,16 @@ public final class EntryPointRules {
     }
 
     private void emitRoute(
-            String verb, String classPath, AnnotationExpr mapping, String methodKey, CallSite site) {
-        String methodPath = SpringAnnotations.firstValue(mapping).orElse("");
+            String verb,
+            String classPath,
+            AnnotationExpr mapping,
+            MethodDeclaration declaringMember,
+            String methodKey,
+            CallSite site,
+            boolean inherited) {
+        String methodPath =
+                SpringAnnotations.resolveConstants(
+                        declaringMember, SpringAnnotations.firstValue(mapping).orElse(""));
         String path = SpringAnnotations.joinPaths(classPath, methodPath);
         String key = "route:" + verb + " " + path;
 
@@ -117,6 +179,10 @@ public final class EntryPointRules {
 
         // An unresolved ${property} placeholder is kept verbatim rather than
         // guessed at, and the edge says so (§6.4).
+        // inferred:true either way — Spring wires the route, it is not a written
+        // call. Inheriting the mapping does not lower confidence: the annotation
+        // was read from a real declaration, not guessed at. Only an unresolved
+        // ${property} placeholder does.
         Confidence confidence = path.contains("${") ? Confidence.AMBIGUOUS : Confidence.EXACT;
         edges.add(key, methodKey, EdgeType.HANDLES, true, confidence, site);
     }

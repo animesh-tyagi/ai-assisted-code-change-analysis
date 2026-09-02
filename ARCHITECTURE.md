@@ -223,9 +223,35 @@ resolution").
 **Route → controller method.** Concatenate the class-level `@RequestMapping`
 path with the method-level `@GetMapping` / `@PostMapping` / `@PutMapping` /
 `@DeleteMapping` / `@PatchMapping` / `@RequestMapping(method=…)`. Normalise path
-variables to `{name}`. Emit an `http_route` surface plus a `handles` edge.
-Unresolved `${property}` placeholders are kept verbatim and flagged
-`confidence: "ambiguous"`.
+variables to `{name}`, and normalise slashes so `/api/` + `list` and `/api` +
+`/list` produce one key rather than two surfaces for one endpoint. Emit an
+`http_route` surface plus a `handles` edge (`inferred: true` — Spring wires the
+route; it is not a written call).
+
+**Inherited mappings.** A controller method with no method-level mapping of its
+own inherits the mapping from the corresponding method on any implemented or
+overridden interface — **in-repo or solver-only**, including OpenAPI-generated
+API interfaces under `target/generated-sources`. The inherited path is
+concatenated with *this controller's* class-level mapping, and the surface and
+`handles` edge attach to the **in-repo controller method**; no node is created
+for the generated interface. Confidence stays `exact`: the annotation was read
+from a real declaration, not guessed.
+
+Without this the rule is close to useless on a common Spring shape. Measured on
+`spring-petclinic-rest`, whose controllers carry only `@RequestMapping("/api")`
+and put every method-level mapping on the generated interface: **1 route before,
+37 after — exactly the 37 endpoints its OpenAPI spec declares.**
+
+A mapping on an **interface** method is a declaration to be inherited, not a
+route in itself — Spring serves a route only through a concrete request-handling
+bean — so no surface is emitted for it. Otherwise one endpoint appears twice:
+unprefixed on the interface and prefixed on the controller.
+
+**Constant paths.** Generated code writes `value = OwnersApi.PATH_DELETE_OWNER`
+rather than a literal. A `static final String` is statically knowable, so the
+constant is resolved to its initialiser on the declaring type. This is *not* the
+same as a `${property}` placeholder, which is runtime configuration: those are
+kept verbatim and flagged `confidence: "ambiguous"`.
 
 **Spring Data derived queries.** An interface is a Spring Data repository if it
 extends any member of the family rooted at
@@ -717,7 +743,7 @@ the rubric change together.
 
 - **Zone 1, `directCallers`:** reverse over `calls` / `implements` / `overrides`, 1–2 hops, full detail. Ranked with signature-incompatible callers first, then by hop count, then by `edgeConfidence` (`exact` above `ambiguous`). Capped at N (start at 15), with `directCallerTotal` always reporting the true number — the count is a fact from the graph, never an LLM estimate.
 - **Zone 2, `reachableSurfaces.entrypoints`:** continue the reverse walk to a safety cap of depth 5, **discarding intermediate functions** and keeping only terminal surfaces, deduped and flattened. This is why a change to a util method yields a short list instead of three hundred nodes.
-- **`reachableSurfaces.data`:** collected in the *forward* direction (a table is downstream of the method, not upstream) from the changed method and its immediate callees, following `queries` and `maps_to`. It sits under `reachableSurfaces` because "which tables does this touch" is what a reviewer wants, but it is a different relationship from `entrypoints` — see open question **Q4**.
+- **`reachableSurfaces.data`:** collected in the *forward* direction (a table is downstream of the method, not upstream) by walking `calls` forward **to the same depth cap as the reverse entrypoints zone**, then following `queries` and `maps_to`, and collapsing to terminal data surfaces only — a deliberate mirror of Zone 2. Carries `minHops` and `viaInferredEdge` for the same reason entrypoints do. One hop is not enough: §6.4's split-interface shape puts the entity two hops from a controller (`controller → service → repository → entity`), the canonical layered Spring shape, so a depth-1 walk would report no data surfaces for exactly the changes reviewers care about most (resolves Q11). It sits under `reachableSurfaces` because "which tables does this touch" is what a reviewer wants, but it is a different relationship from `entrypoints` — see open question **Q4**.
 - **`nowDependsOn`:** forward, exactly one hop. `isNew` is computed by diffing the head overlay's outgoing edges against the base graph's. Kept structurally separate from `affectedBy` so the LLM cannot conflate "affected by" with "depends on".
 - **`viaInferredEdge`** is set when any edge on the shortest path was Spring-inferred rather than literally written. The UI and the explanation both need to say "…via the single `@Service` implementation" rather than assert the connection flatly.
 - **Rejected:** unbounded reverse traversal keeping all nodes (util changes fan out to hundreds), and symmetric full both-directions traversal (doubles tokens and blurs the two relationships).
@@ -977,8 +1003,10 @@ is petclinic's shape and the canonical one — a controller-level change is two
 `calls` hops from the repository and would report **no data surfaces at all**.
 That is the common case, not an edge case. *Proposed:* walk `calls` forward to a
 depth cap and collapse to terminal data surfaces, mirroring how
-`reachableSurfaces.entrypoints` already handles the reverse direction. Decide
-before M4 implements the traversal.
+`reachableSurfaces.entrypoints` already handles the reverse direction.
+**Resolved:** approved as proposed; §10 updated. `nowDependsOn.callees` stays at
+one hop — a different question (what this change now depends on, not what data
+it reaches).
 
 ### 16.1 Answers (BUILD_PLAN Step 0)
 

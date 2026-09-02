@@ -3,6 +3,9 @@ package com.impact.parser.spring;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.body.BodyDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
@@ -107,6 +110,50 @@ public final class SpringAnnotations {
             return Optional.of(unquote(first));
         }
         return Optional.of(value);
+    }
+
+    /**
+     * Resolves a constant reference in an annotation value to its string literal.
+     *
+     * <p>Generated OpenAPI interfaces write
+     * {@code @RequestMapping(value = OwnersApi.PATH_DELETE_OWNER)} rather than an
+     * inline path. Left unresolved, every petclinic route key would read
+     * {@code /api/OwnersApi.PATH_DELETE_OWNER} — the right count of routes with
+     * none of the right paths, which is worse than useless in an explanation.
+     *
+     * <p>Unlike a {@code ${property}} placeholder, a {@code static final String} is
+     * statically knowable, so resolving it is exact rather than a guess. The
+     * constant is looked up on the type that declares the annotated method, which
+     * is where generated code puts it.
+     */
+    public static String resolveConstants(BodyDeclaration<?> declaringMember, String value) {
+        if (value == null || value.isBlank() || value.startsWith("/")) {
+            return value;
+        }
+        // Bare identifier, or Type.CONSTANT — take the last segment as the field.
+        String fieldName = value.contains(".") ? value.substring(value.lastIndexOf('.') + 1) : value;
+        if (!fieldName.matches("[A-Z][A-Z0-9_]*")) {
+            return value; // not a constant-shaped name; leave it as written
+        }
+        return declaringMember
+                .findAncestor(TypeDeclaration.class)
+                .flatMap(type -> constantValue(type, fieldName))
+                .orElse(value);
+    }
+
+    private static Optional<String> constantValue(TypeDeclaration<?> type, String fieldName) {
+        for (FieldDeclaration field : type.getFields()) {
+            for (VariableDeclarator variable : field.getVariables()) {
+                if (!variable.getNameAsString().equals(fieldName)) {
+                    continue;
+                }
+                return variable
+                        .getInitializer()
+                        .filter(StringLiteralExpr.class::isInstance)
+                        .map(init -> ((StringLiteralExpr) init).asString());
+            }
+        }
+        return Optional.empty();
     }
 
     private static String literalOf(Expression expression) {

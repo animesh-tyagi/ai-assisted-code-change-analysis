@@ -174,6 +174,99 @@ class EntryPointRulesTest {
     }
 
     @Nested
+    @DisplayName("inherited route mappings")
+    class InheritedRoutes {
+
+        @Test
+        void aControllerInheritsTheMappingFromAGeneratedApiInterface() throws IOException {
+            // This is petclinic's real shape: the hand-written controller carries
+            // only the class-level @RequestMapping and implements an OpenAPI-
+            // generated interface where every method-level mapping actually lives.
+            // The generated interface is on the solver path but NOT extracted, so
+            // this also confirms the mechanism the whole rule depends on —
+            // annotations are readable off an AST reached through the type solver,
+            // even though that parse carries no symbol resolver of its own.
+            writeSource(
+                    "target/generated-sources/openapi/src/main/java/com/acme/api/OwnersApi.java",
+                    """
+                    package com.acme.api;
+                    public interface OwnersApi {
+                        @RequestMapping(method = RequestMethod.GET, value = "/owners/{id}")
+                        String getOwner(Integer id);
+                        @RequestMapping(method = RequestMethod.POST, value = "/owners")
+                        String addOwner(String body);
+                    }
+                    """);
+            writeSource(
+                    "src/main/java/com/acme/OwnerController.java",
+                    """
+                    package com.acme;
+                    import com.acme.api.OwnersApi;
+                    @RestController
+                    @RequestMapping("/api")
+                    class OwnerController implements OwnersApi {
+                        @Override
+                        public String getOwner(Integer id) { return "x"; }
+                        @Override
+                        public String addOwner(String body) { return "y"; }
+                    }
+                    """);
+
+            ExtractionResult result = extract();
+
+            // The class-level prefix belongs to the controller, the method-level
+            // path to the interface.
+            assertThat(result.surfaces())
+                    .filteredOn(s -> s.kind() == SurfaceKind.HTTP_ROUTE)
+                    .extracting(Surface::key)
+                    .containsExactlyInAnyOrder(
+                            "route:GET /api/owners/{id}", "route:POST /api/owners");
+
+            // The handles edge attaches to the IN-REPO controller method. No node
+            // is created for the generated interface.
+            var handles = edge(result, "route:GET /api/owners/{id}", EdgeType.HANDLES);
+            assertThat(handles).isPresent();
+            assertThat(handles.get().to())
+                    .isEqualTo("fn:com.acme.OwnerController#getOwner(java.lang.Integer)");
+            assertThat(handles.get().inferred()).isTrue();
+            assertThat(handles.get().confidence()).isEqualTo(Confidence.EXACT);
+
+            assertThat(result.functions())
+                    .extracting(f -> f.fqcn())
+                    .doesNotContain("com.acme.api.OwnersApi");
+        }
+
+        @Test
+        void anOwnMappingWinsOverAnInheritedOne() throws IOException {
+            writeSource(
+                    "src/main/java/com/acme/Base.java",
+                    """
+                    package com.acme;
+                    public interface Base {
+                        @GetMapping("/from-interface")
+                        String go();
+                    }
+                    """);
+            writeSource(
+                    "src/main/java/com/acme/Impl.java",
+                    """
+                    package com.acme;
+                    @RequestMapping("/api")
+                    class Impl implements Base {
+                        @Override
+                        @GetMapping("/own")
+                        public String go() { return "x"; }
+                    }
+                    """);
+
+            assertThat(extract().surfaces())
+                    .filteredOn(s -> s.kind() == SurfaceKind.HTTP_ROUTE)
+                    .extracting(Surface::key)
+                    .containsExactly("route:GET /api/own");
+        }
+    }
+
+    @Nested
     @DisplayName("scheduled jobs and listeners")
     class OtherEntryPoints {
 
