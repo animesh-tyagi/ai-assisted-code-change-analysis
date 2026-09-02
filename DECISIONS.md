@@ -279,31 +279,49 @@ caller — is far more dangerous than a hedged false positive."
 Open items awaiting a call. Each states the evidence and the intended default so work can
 proceed; move it into the body above once decided.
 
-### ⏳ PENDING — Spring Data: which base interfaces count as a repository? (§6.4)
-**Status:** pending. Needed before M2 phase 5 (Spring rules). Proceeding on the intended
-default below unless overridden.
-**Found during:** M2 phase 1, verifying `spring-petclinic-rest` after cloning it to
-`_validation/`.
-**The gap:** ARCHITECTURE §6.4 defines a Spring Data repository as an interface extending
-`JpaRepository<T,ID>`, `CrudRepository`, or `PagingAndSortingRepository`. But
-`spring-petclinic-rest` — the repo chosen specifically to validate this rule — extends the
-*base marker* `org.springframework.data.repository.Repository<T,ID>` instead:
+_(resolved — moved to "Spring Data repository detection" below)_
 
-```java
-@Profile("spring-data-jpa")
-public interface SpringDataOwnerRepository extends OwnerRepository, Repository<Owner, Integer> { … }
-```
 
-Implemented literally, the rule matches **zero** interfaces in the one repo meant to prove it
-works, and the Spring Data edge type would ship unvalidated against real code.
-**Intended default:** treat the whole Spring Data repository family as repositories — the base
-`Repository<T,ID>` marker included — and take the entity from the first type argument wherever
-it appears in the hierarchy. `Repository<T,ID>` is the root the other three all extend, so
-matching it is strictly more general and cannot lose a match.
-**Also worth noting for the same rule:** petclinic's derived-query surface is thinner than
-assumed. Most methods are `@Query`-annotated (the `regex` confidence path) or inherited from a
-plain non-Spring-Data interface; genuine derived names (`findByLastName`) exist but are the
-minority. Both paths are exercised, just not in the proportion the doc implies.
-**Consequence if deferred:** phase 5 ships a Spring Data rule with no real-code validation,
-which is exactly what the "no toy examples" convention exists to prevent.
-**Decision:** _pending_ — update §6.4 to match, or state why the narrower set is intended.
+---
+
+## Spring Data repository detection (resolves the ebce603 pending item)
+
+### Match the whole family rooted at `Repository<T,ID>`, gated on the import
+**Chose:** an interface is a Spring Data repository if it extends any member of the
+family rooted at `org.springframework.data.repository.Repository<T,ID>` —
+`CrudRepository`, `PagingAndSortingRepository` and `JpaRepository` all extend it. `T` is
+taken from whichever marker appears. Detection is gated on the supertype's **import**
+resolving to `org.springframework.data.repository.*`, never on the bare name
+`Repository`, which is far too common to match safely.
+**Why:** §6.4 originally named only `JpaRepository` / `CrudRepository` /
+`PagingAndSortingRepository`. `spring-petclinic-rest` — the repo chosen specifically to
+validate this rule — uses **none** of them: all seven of its repositories extend the base
+marker directly (`SpringDataOwnerRepository extends OwnerRepository, Repository<Owner,
+Integer>`). Measured: `grep` for the three named interfaces returns **0 files**. The
+narrow rule would have matched nothing in the only repo able to prove it works.
+`Repository<T,ID>` is the root the other three extend, so matching it is strictly more
+general and cannot lose a match.
+**Split-interface shape:** the marker often sits on a sub-interface that extends an
+in-repo domain interface which declares the actual methods. `T` therefore binds to
+methods reachable through the marker interface's in-repo super-interface chain, and
+`queries` edges are emitted at those method **declarations**, not at call sites. That
+composes with the existing bucket-1 `calls` edges rather than duplicating them:
+`entity:Owner ← queries ← OwnerRepository#findByLastName ← calls ← ClinicServiceImpl`.
+**Interview line:** "The canonical PetClinic doesn't use `JpaRepository` at all — it uses
+the base `Repository` marker — so I matched the family root instead of the popular
+subclass, and gated it on the resolved import rather than the bare type name."
+
+### Deferred: inherited CRUD called through a Spring-Data-typed reference
+**Chose:** do **not** yet emit `queries` edges for inherited CRUD (`save`, `findById`,
+`findAll`, `delete`, `count`) invoked on a reference whose declared type is the Spring
+Data interface itself.
+**Why:** that shape (`interface UserRepo extends JpaRepository<User,Long> {}` then
+`userRepo.save(u)`) exists in **neither** validation repo. petclinic's services hold the
+plain in-repo interfaces (`private final OwnerRepository ownerRepository`), so their
+repository calls already resolve in-repo and are bucket-1 `calls` edges — never
+`external_type`. Building the sub-rule now would ship it covered only by author-written
+fixtures, which is exactly what the "no toy examples" convention exists to prevent.
+**Degrades gracefully:** such calls land in `external_type`, so `nonExternalUnresolvedRate`
+— the alerting metric — stays 0 and nothing looks broken.
+**Roadmap trigger:** a validation repo that calls inherited CRUD
+(`save`/`findById`/`findAll`/…) on a reference typed as the Spring Data interface.

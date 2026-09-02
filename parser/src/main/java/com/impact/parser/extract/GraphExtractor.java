@@ -9,6 +9,8 @@ import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.resolution.TypeSolver;
 import com.github.javaparser.symbolsolver.JavaSymbolSolver;
 import com.impact.parser.graph.EdgeCollector;
+import com.impact.parser.graph.SurfaceCollector;
+import com.impact.parser.spring.EntryPointRules;
 import com.impact.parser.graph.ParsedFunction;
 import com.impact.parser.workspace.WorkspaceLayout;
 import java.io.IOException;
@@ -77,6 +79,7 @@ public final class GraphExtractor {
         List<ParsedFunction> functions = new ArrayList<>();
         List<ParseError> errors = new ArrayList<>();
         EdgeCollector collector = new EdgeCollector();
+        SurfaceCollector surfaces = new SurfaceCollector();
         EdgeExtractor.Stats stats = new EdgeExtractor.Stats();
         Map<String, String> keyIndexRef = new HashMap<>();
         EdgeExtractor edgeExtractor = new EdgeExtractor(collector, stats, keyIndexRef, layout.extractionRoots());
@@ -121,9 +124,18 @@ public final class GraphExtractor {
             parsed.add(new ParsedFile(cu, relativePath, anonymousNames));
         }
 
+        EntryPointRules entryPoints = new EntryPointRules(collector, surfaces);
+
         for (ParsedFile file : parsed) {
             try {
                 edgeExtractor.extractFrom(file.cu(), file.relativePath(), file.anonymousNames());
+                // Spring rules run in the same pass. keyOf is handed the same
+                // naming function functions[] used, so a surface can never point at
+                // a key no node carries.
+                entryPoints.apply(
+                        file.cu(),
+                        file.relativePath(),
+                        method -> Declarations.keyOf(method, file.anonymousNames()));
             } catch (RuntimeException e) {
                 // Edge extraction failing must not cost us the file's nodes.
                 errors.add(
@@ -143,6 +155,7 @@ public final class GraphExtractor {
         return new ExtractionResult(
                 List.copyOf(functions),
                 collector.toList(),
+                surfaces.toList(),
                 List.copyOf(errors),
                 filesParsed,
                 unresolvedParams,

@@ -227,15 +227,51 @@ variables to `{name}`. Emit an `http_route` surface plus a `handles` edge.
 Unresolved `${property}` placeholders are kept verbatim and flagged
 `confidence: "ambiguous"`.
 
-**Spring Data derived queries.** For an interface extending `JpaRepository<T,ID>`,
-`CrudRepository`, or `PagingAndSortingRepository`, take the entity from the type
-argument `T`. Map entity → table from `@Table(name=…)`, else `@Entity(name=…)`,
-else Spring Boot's default `CamelCaseToUnderscoresNamingStrategy`
-(`UserAccount` → `user_account`). Parse derived method names on the
+**Spring Data derived queries.** An interface is a Spring Data repository if it
+extends any member of the family rooted at
+`org.springframework.data.repository.Repository<T,ID>` — `CrudRepository`,
+`PagingAndSortingRepository` and `JpaRepository` all extend it. Take the entity
+from whichever marker appears as its type argument `T`.
+
+Match the **family root, not the popular subclass**: `spring-petclinic-rest` uses
+none of the three named subinterfaces, and matching only those finds nothing
+there. Detection is gated on the supertype's **import** resolving to
+`org.springframework.data.repository.*` — never on the bare name `Repository`,
+which is far too common to match safely.
+
+**Split-interface shape.** The marker frequently sits on a sub-interface that
+extends an in-repo domain interface declaring the actual methods:
+
+```java
+public interface SpringDataOwnerRepository
+        extends OwnerRepository, Repository<Owner, Integer> { … }
+```
+
+`T` therefore binds to the methods reachable through the marker interface's
+in-repo super-interface chain, and `queries` edges are emitted at those method
+**declarations**, not at call sites. That composes with the ordinary `calls`
+edges instead of duplicating them:
+
+```
+entity:Owner ← queries ← OwnerRepository#findByLastName ← calls ← ClinicServiceImpl…
+```
+
+Map entity → table from `@Table(name=…)`, else `@Entity(name=…)`, else Spring
+Boot's default `CamelCaseToUnderscoresNamingStrategy` (`UserAccount` →
+`user_account`). Parse derived method names on the
 `findBy|readBy|getBy|queryBy|countBy|existsBy|deleteBy` prefix and emit
 `queries` (fn → entity) plus `maps_to` (entity → table). `@Query` methods:
 extract referenced names by regex from the JPQL/native string and mark
 `confidence: "regex"`.
+
+Access is taken from the method's verb: `save`/`delete`/`persist` are writes;
+`find`/`get`/`read`/`exists`/`count`/`stream` are reads.
+
+*Not yet covered:* inherited CRUD invoked on a reference whose declared type is
+the Spring Data interface itself (`userRepo.save(u)` where
+`interface UserRepo extends JpaRepository<User,Long>`). That shape appears in
+neither validation repo, so it is deferred rather than shipped fixture-only —
+see §17. It degrades to `external_type`, leaving the alerting metric at zero.
 
 **Entry points.** `@Scheduled` → `scheduled_job` surface. `@KafkaListener`,
 `@RabbitListener`, `@JmsListener`, `@EventListener` → `message_listener`
@@ -931,6 +967,19 @@ taking minutes and blowing the PR→ready latency budget?
 **Q10 — Frontend graph size.** *Assumption:* the force-directed view caps at ~150
 nodes, collapsing beyond that. Confirm the cap and the collapse behaviour.
 
+**Q11 — Forward data-surface depth (found in M2 phase 5).** §10 collects
+`reachableSurfaces.data` "from the changed method **and its immediate callees**"
+— one `calls` hop, then `queries`/`maps_to`. With §6.4's split-interface shape
+the chain is `caller → calls → RepositoryInterface#method → queries → entity`,
+so composition works only when the changed method calls the repository
+*directly*. In a layered Spring app — controller → service → repository, which
+is petclinic's shape and the canonical one — a controller-level change is two
+`calls` hops from the repository and would report **no data surfaces at all**.
+That is the common case, not an edge case. *Proposed:* walk `calls` forward to a
+depth cap and collapse to terminal data surfaces, mirroring how
+`reachableSurfaces.entrypoints` already handles the reverse direction. Decide
+before M4 implements the traversal.
+
 ### 16.1 Answers (BUILD_PLAN Step 0)
 
 Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone.
@@ -970,6 +1019,7 @@ Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone
 
 - **Classpath type resolution** — `mvn dependency:build-classpath` / the Gradle equivalent, a `JarTypeSolver` per jar, cached per `pom.xml` / `build.gradle` hash. Sits behind the TypeSolver interface from D2, so it lands without touching the graph model or node keys. Fixes the overload limitation (§6.6). *Trigger:* `unresolvedRate` persistently high enough to degrade explanations.
 - **Incremental indexing** — dirty-set expansion (re-parse changed files plus files whose resolution depends on them), with a periodic full rebuild as a correctness backstop. *Trigger:* full re-index time exceeding an acceptable webhook-to-ready latency.
+- **Inherited CRUD through a Spring-Data-typed reference** — `queries` edges for `save` / `findById` / `findAll` / `delete` / `count` called on a reference whose declared type is the Spring Data interface itself, rather than an in-repo domain interface. Deferred because the shape exists in neither validation repo, so building it now would ship a rule covered only by author-written fixtures — the thing the no-toy-examples convention exists to prevent. Degrades to `external_type`, so the alerting metric stays honest. *Trigger:* a validation repo that calls inherited CRUD on a reference typed as the Spring Data interface.
 - **Claim-level citations** (§11.4).
 - **Rename-crossing change history** (§12).
 - **Test-coverage edges** (Q2).

@@ -74,6 +74,18 @@ class RealRepoExtractionTest {
 
         result.parseErrors().forEach(e -> System.out.printf("  PARSE ERROR %s: %s%n", e.filePath(), e.message()));
 
+        System.out.printf("  surfaces            : %d%n", result.surfaces().size());
+        result.surfaces().stream()
+                .collect(Collectors.groupingBy(x -> x.kind().wireName(), Collectors.counting()))
+                .entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> System.out.printf("    %-20s %d%n", e.getKey(), e.getValue()));
+        System.out.println("  sample routes:");
+        result.surfaces().stream()
+                .filter(x -> x.kind() == com.impact.parser.graph.SurfaceKind.HTTP_ROUTE)
+                .limit(6)
+                .forEach(x -> System.out.printf("    %s%n", x.key()));
+
         System.out.println("  unresolved edges by reason:");
         result.edges().stream()
                 .filter(e -> e.type() == EdgeType.UNRESOLVED)

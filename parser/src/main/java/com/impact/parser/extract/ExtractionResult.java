@@ -3,6 +3,7 @@ package com.impact.parser.extract;
 import com.impact.parser.graph.GraphEdge;
 import com.impact.parser.graph.UnresolvedReason;
 import com.impact.parser.graph.ParsedFunction;
+import com.impact.parser.graph.Surface;
 import java.util.List;
 
 /**
@@ -23,6 +24,7 @@ import java.util.List;
 public record ExtractionResult(
         List<ParsedFunction> functions,
         List<GraphEdge> edges,
+        List<Surface> surfaces,
         List<ParseError> parseErrors,
         int filesParsed,
         int unresolvedParamTypes,
