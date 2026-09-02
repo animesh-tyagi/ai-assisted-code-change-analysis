@@ -113,20 +113,6 @@ public final class SpringAnnotations {
     }
 
     /**
-     * Resolves a constant reference in an annotation value to its string literal.
-     *
-     * <p>Generated OpenAPI interfaces write
-     * {@code @RequestMapping(value = OwnersApi.PATH_DELETE_OWNER)} rather than an
-     * inline path. Left unresolved, every petclinic route key would read
-     * {@code /api/OwnersApi.PATH_DELETE_OWNER} — the right count of routes with
-     * none of the right paths, which is worse than useless in an explanation.
-     *
-     * <p>Unlike a {@code ${property}} placeholder, a {@code static final String} is
-     * statically knowable, so resolving it is exact rather than a guess. The
-     * constant is looked up on the type that declares the annotated method, which
-     * is where generated code puts it.
-     */
-    /**
      * A resolved path plus whether it is trustworthy enough to key a route on.
      *
      * @param exact false when the value could not be fully evaluated, in which

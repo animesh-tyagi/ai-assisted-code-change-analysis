@@ -359,3 +359,52 @@ the generated-interface shape.
 **Interview line:** "PetClinic's routes live on OpenAPI-generated interfaces, not on the
 controllers — so I inherit the mapping through the type hierarchy and attach the route to
 the hand-written method. That took the route count from 1 to the full 37 the spec declares."
+
+
+---
+
+## Validation coverage (M2)
+
+Which edge and surface types are proven against **real code**, and which are only
+fixture-tested. This is not the roadmap: everything below is *built and passing*. The
+distinction is what evidence stands behind each rule, so nobody later mistakes a green
+test suite for real-world proof.
+
+Measured on `observability-final` (71 files / 360 fns) and `spring-petclinic-rest`
+(87 files / 388 fns).
+
+### Validated against real code
+
+| Rule | Evidence |
+|---|---|
+| `calls` (resolved, intra-repo) | 333 in observability, 462 in petclinic |
+| `unresolved` + `external` split | 22 / 483 unresolved, all `external_type`; **nonExternalUnresolvedRate 0.0% in both** |
+| `implements` (structural, annotation-independent) | 8 in observability (the four hand-wired `FailureStrategy` impls), 108 in petclinic |
+| interface **dispatch** (`calls` → impls) | +8 observability, +129 petclinic; petclinic's three profile-scoped impls per repository interface exercise the `ambiguous` path, observability's unannotated impls exercise annotation-independent discovery |
+| `handles` + `http_route`, **including inheritance** | 21 observability; petclinic 1 → 37, matching the 37 endpoints its OpenAPI spec declares |
+| `triggers` + `scheduled_job` | 1 in observability (`MetricsAggregator`) |
+| `queries` + `maps_to` + entity/table surfaces | 43 / 7 in petclinic, 7 entity + 7 table surfaces; **composition verified on the real repo** — 57 nodes reverse-reachable from `entity:…model.Owner`, reaching `OwnerRepository` → `ClinicService` → REST controllers → route surfaces |
+| determinism (§8 purity) | byte-identical across repeated runs on both real trees |
+
+### Fixture-only
+
+**`overrides`** — built, unit-tested (`subclassMethodsOverrideTheirSuperclass`), and
+measured at **0 in both repos**. That zero is *semantically correct*, not a bug: every
+`@Override` in either repo either implements an in-repo interface (correctly emitted as
+`implements`) or overrides `java.lang.Object#toString` / a framework interface, and
+external supertypes are deliberately skipped because nobody can act on a change to them.
+Verified by inspection: neither repo contains an in-repo class-extends-class method
+override anywhere. `NamedEntity#toString` and `Owner#toString` both override `Object`.
+
+So the rule's *code path* is proven by fixture and its *absence* is proven correct on real
+code — but it has never fired against a real hierarchy, which is weaker evidence than
+every row above.
+
+**Trigger to close:** a validation repo containing an in-repo class-extends-class method
+override (a subclass overriding a superclass method, both in the extraction set). At that
+point re-measure and move `overrides` into the validated table.
+
+**Why this is recorded rather than deferred:** the "no toy examples" convention exists to
+stop a rule being written and tested to the same possibly-wrong understanding. `overrides`
+is simple enough that the risk is low, but the evidence is genuinely thinner than for the
+other rules, and saying so is cheaper than discovering it later.

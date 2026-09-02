@@ -82,9 +82,19 @@ typescript-eslint supports TS 7.
 
 Parser service (`/parser`, Java 21 + Maven):
 ```bash
-cd parser && mvn test            # unit + regression tests
-cd parser && mvn spring-boot:run # serves on :8080 (HTTP lands in M2 phase 7)
+cd parser && mvn test                    # unit + regression tests
+cd parser && mvn package -DskipTests     # builds target/parser-0.1.0.jar
+cd parser && mvn spring-boot:run         # serves on :8080 (HTTP lands in M2 phase 7)
 ```
+
+Parser CLI — point it at a repo and dump the §8 JSON (M2 phase 6). Any CLI flag
+selects one-shot mode; with none, the jar starts the web service:
+```bash
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --summary          # digest for eyeballing
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --out graph.json   # full JSON
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --files a.java,b.java   # subset mode (D4)
+```
+Exit codes: 0 ok, 2 usage error or no Java source roots (§8's 422 case).
 
 Validating the parser against the two real repos (DECISIONS, "Validation & eval repos").
 These tests **skip** when the properties are unset, so a plain `mvn test` stays green

@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -150,7 +151,13 @@ final class FunctionExtractor {
                 values.put(pair.getNameAsString(), literalOf(pair.getValue()));
             }
         }
-        return new AnnotationRef(annotation.getName().getIdentifier(), Map.copyOf(values));
+        // NOT Map.copyOf: its iteration order depends on a per-JVM random salt, so
+        // it silently discards the TreeMap ordering above. The salt is constant
+        // within a JVM, which is why every in-process determinism test passed while
+        // two CLI runs produced different bytes for the same commit — a §8 purity
+        // violation that would have made graph versions irreproducible.
+        return new AnnotationRef(
+                annotation.getName().getIdentifier(), Collections.unmodifiableMap(values));
     }
 
     /**

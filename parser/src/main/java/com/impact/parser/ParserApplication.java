@@ -1,5 +1,6 @@
 package com.impact.parser;
 
+import com.impact.parser.cli.ParseCommand;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -22,6 +23,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class ParserApplication {
 
     public static void main(String[] args) {
+        // One-shot CLI when --dir is given, web service otherwise. The CLI runs
+        // without starting Spring at all: it needs no beans, and booting a web
+        // server to print JSON to stdout would only add latency and noise to the
+        // thing BUILD_PLAN wants used for eyeballing edges.
+        if (ParseCommand.isCliInvocation(args)) {
+            System.exit(ParseCommand.run(args));
+        }
         SpringApplication.run(ParserApplication.class, args);
     }
 }
