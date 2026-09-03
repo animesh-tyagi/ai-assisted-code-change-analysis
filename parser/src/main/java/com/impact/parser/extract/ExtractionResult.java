@@ -20,6 +20,18 @@ import java.util.List;
  *     entirely intra-repo, and nobody can act on a change to
  *     {@code java.util.HashMap}. Counted so the omission stays visible and is
  *     never confused with a resolution failure.
+ * @param failedDeclarations declarations whose own call-site/inheritance
+ *     extraction threw, isolated so one unresolvable symbol costs one
+ *     declaration's edges, never a whole file's. Should be zero; non-zero
+ *     means a real bug, not an expected resolution gap.
+ * @param guardedFailures call sites where resolution succeeded but recording
+ *     the resulting edge then threw. Should be zero; non-zero means a bug in
+ *     edge construction or the collector, not in symbol resolution.
+ * @param targetsMissingFromIndex in-extraction-set call targets whose key had
+ *     to be recomputed instead of read from the position index built during
+ *     extraction. Zero in full mode; can be non-zero in subset mode, where a
+ *     call may target a file outside the indexed subset (a known, disclosed
+ *     gap — see DECISIONS.md).
  */
 public record ExtractionResult(
         List<ParsedFunction> functions,
@@ -29,7 +41,10 @@ public record ExtractionResult(
         int filesParsed,
         int unresolvedParamTypes,
         int externalCalls,
-        List<String> ambiguousOverloads) {
+        List<String> ambiguousOverloads,
+        int failedDeclarations,
+        int guardedFailures,
+        int targetsMissingFromIndex) {
 
     /** Share of parameter types that could not be resolved, across all functions. */
     public double unresolvedParamRate() {

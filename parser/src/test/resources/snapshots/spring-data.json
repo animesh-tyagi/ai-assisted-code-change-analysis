@@ -113,8 +113,7 @@
       "line" : 0
     } ],
     "reason" : null,
-    "candidates" : [ ],
-    "unresolved" : false
+    "candidates" : [ ]
   }, {
     "from" : "fn:com.acme.repository.WidgetRepository#findByName(java.lang.String)",
     "to" : "entity:com.acme.model.Widget",
@@ -126,8 +125,7 @@
       "line" : 5
     } ],
     "reason" : null,
-    "candidates" : [ ],
-    "unresolved" : false
+    "candidates" : [ ]
   }, {
     "from" : "fn:com.acme.service.WidgetService#find(java.lang.String)",
     "to" : "fn:com.acme.repository.WidgetRepository#findByName(java.lang.String)",
@@ -139,8 +137,7 @@
       "line" : 15
     } ],
     "reason" : null,
-    "candidates" : [ ],
-    "unresolved" : false
+    "candidates" : [ ]
   } ],
   "diagnostics" : {
     "durationMs" : -1,
@@ -152,6 +149,9 @@
     "nonExternalUnresolvedRate" : 0.0,
     "externalCalls" : 1,
     "unresolvedParamTypes" : 1,
-    "ambiguousOverloads" : [ ]
+    "ambiguousOverloads" : [ ],
+    "failedDeclarations" : 0,
+    "guardedFailures" : 0,
+    "targetsMissingFromIndex" : 0
   }
 }

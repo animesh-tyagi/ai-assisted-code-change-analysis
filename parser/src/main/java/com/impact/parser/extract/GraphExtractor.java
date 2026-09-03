@@ -154,13 +154,27 @@ public final class GraphExtractor {
                         method ->
                                 Declarations.keyOfIndexed(
                                         method, keyIndexRef, file.anonymousNames()));
-                collectSelectors(file, primaryKeys, qualifiedKeys);
+                collectSelectors(file, keyIndexRef, primaryKeys, qualifiedKeys);
             } catch (RuntimeException e) {
-                // Edge extraction failing must not cost us the file's nodes.
+                // A failure anywhere in this pass (edges, entry points, Spring
+                // Data, or selector collection) must not cost us the file's
+                // nodes from the first pass. The message says "graph rule"
+                // rather than "edge extraction" because all four stages share
+                // this one try/catch — a Spring Data failure here is reported
+                // the same way as an edge-extraction failure, so it stays
+                // accurate rather than pointing at the wrong stage. A failure
+                // partway through also means any @Primary/@Qualifier selectors
+                // collectSelectors would have found for this file are lost for
+                // the whole run; that fails toward InterfaceDispatchRules
+                // treating the affected call as ambiguous rather than resolving
+                // it — the same safe-by-default outcome the rule already uses
+                // when a selector genuinely doesn't disambiguate, not a wrong
+                // edge, so it is accepted as a known limitation rather than
+                // split into per-stage handling.
                 errors.add(
                         new ParseError(
                                 file.relativePath(),
-                                "edge extraction failed: "
+                                "graph rule extraction failed: "
                                         + e.getClass().getSimpleName()
                                         + ": "
                                         + e.getMessage()));
@@ -183,16 +197,29 @@ public final class GraphExtractor {
                 filesParsed,
                 unresolvedParams,
                 stats.externalCalls,
-                ambiguous);
+                ambiguous,
+                stats.failedDeclarations,
+                stats.guardedFailures,
+                stats.targetsMissingFromIndex);
     }
 
     /**
      * Records methods whose declaring class carries {@code @Primary} or
      * {@code @Qualifier}, so interface dispatch can narrow candidates. The
      * annotations sit on the class, but selection happens per method.
+     *
+     * <p>Keys are looked up by position ({@link Declarations#keyOfIndexed}) so
+     * the selector key can never disagree with the key {@code functions[]} gave
+     * the same method — {@link Declarations#keyOf} recomputes from the AST, which
+     * is only safe for a declaration this same pass parsed, and is exactly the
+     * trap that has already cost two other call sites (edge targets, then Spring
+     * Data {@code queries}).
      */
     private static void collectSelectors(
-            ParsedFile file, java.util.Set<String> primaryKeys, java.util.Set<String> qualifiedKeys) {
+            ParsedFile file,
+            Map<String, String> keyIndex,
+            java.util.Set<String> primaryKeys,
+            java.util.Set<String> qualifiedKeys) {
         for (var type :
                 file.cu().findAll(com.github.javaparser.ast.body.ClassOrInterfaceDeclaration.class)) {
             boolean primary = SpringAnnotations.has(type, SpringAnnotations.PRIMARY);
@@ -201,7 +228,7 @@ public final class GraphExtractor {
                 continue;
             }
             for (var method : type.getMethods()) {
-                String key = Declarations.keyOf(method, file.anonymousNames());
+                String key = Declarations.keyOfIndexed(method, keyIndex, file.anonymousNames());
                 if (primary) {
                     primaryKeys.add(key);
                 }

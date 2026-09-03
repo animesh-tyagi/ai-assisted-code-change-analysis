@@ -53,8 +53,8 @@ public final class EntryPointRules {
                 String methodKey = keyOf.apply(method);
                 CallSite site = new CallSite(relativePath, method.getBegin().map(p -> p.line).orElse(0));
                 httpRoute(type, method, classPath, methodKey, site);
-                scheduledJob(method, methodKey, site);
-                messageListener(method, methodKey, site);
+                scheduledJob(type, method, methodKey, site);
+                messageListener(type, method, methodKey, site);
             }
         }
     }
@@ -192,8 +192,42 @@ public final class EntryPointRules {
     // Scheduled jobs and listeners
     // -----------------------------------------------------------------------
 
-    private void scheduledJob(MethodDeclaration method, String methodKey, CallSite site) {
-        SpringAnnotations.find(method, SpringAnnotations.SCHEDULED)
+    /**
+     * Finds an annotation on the method that will actually run it, not on an
+     * abstract declaration that never does.
+     *
+     * <p>Mirrors {@link #httpRoute}'s interface handling, generalized: an
+     * interface method can never itself be scheduled or invoked as a listener
+     * (there is no bean to run it), so a direct annotation there is not a real
+     * entry point — and a concrete override that leaves the annotation on the
+     * interface and doesn't repeat it is still a real one, found by walking
+     * {@link Supertypes#correspondingMethods}. Before this, {@code
+     * scheduledJob}/{@code messageListener} read only the method's own
+     * annotations, which cut both ways: an interface-declared {@code @Scheduled}
+     * produced a surface for a method that can never run, while a concrete
+     * override relying on an inherited annotation produced none at all.
+     */
+    private static Optional<AnnotationExpr> declaredAnnotation(
+            ClassOrInterfaceDeclaration type, MethodDeclaration method, String annotationName) {
+        if (type.isInterface()) {
+            return Optional.empty();
+        }
+        Optional<AnnotationExpr> direct = SpringAnnotations.find(method, annotationName);
+        if (direct.isPresent()) {
+            return direct;
+        }
+        for (MethodDeclaration inherited : Supertypes.correspondingMethods(type, method)) {
+            Optional<AnnotationExpr> found = SpringAnnotations.find(inherited, annotationName);
+            if (found.isPresent()) {
+                return found;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void scheduledJob(
+            ClassOrInterfaceDeclaration type, MethodDeclaration method, String methodKey, CallSite site) {
+        declaredAnnotation(type, method, SpringAnnotations.SCHEDULED)
                 .ifPresent(
                         annotation -> {
                             String key = "job:" + methodKey.substring("fn:".length());
@@ -207,9 +241,10 @@ public final class EntryPointRules {
                         });
     }
 
-    private void messageListener(MethodDeclaration method, String methodKey, CallSite site) {
+    private void messageListener(
+            ClassOrInterfaceDeclaration type, MethodDeclaration method, String methodKey, CallSite site) {
         for (var entry : SpringAnnotations.LISTENERS.entrySet()) {
-            SpringAnnotations.find(method, entry.getKey())
+            declaredAnnotation(type, method, entry.getKey())
                     .ifPresent(
                             annotation -> {
                                 Map<String, String> members = SpringAnnotations.members(annotation);

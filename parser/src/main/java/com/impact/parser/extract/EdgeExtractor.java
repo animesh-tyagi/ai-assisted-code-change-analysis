@@ -6,7 +6,6 @@ import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.MethodReferenceExpr;
 import com.github.javaparser.ast.expr.ObjectCreationExpr;
-import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.resolution.declarations.ResolvedConstructorDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedReferenceTypeDeclaration;
@@ -49,6 +48,20 @@ final class EdgeExtractor {
         int unresolvedCalls;
         int ambiguousOverloads;
         int failedDeclarations;
+        /**
+         * Call sites where the inner resolve/record logic itself threw, after
+         * already getting past the resolution attempt each of
+         * {@code resolveCall}/{@code resolveConstruction}/{@code
+         * resolveMethodReference} makes. A pre-merge review found this catch
+         * ({@link #guard(Runnable)}) swallowing with zero count — CLAUDE.md's
+         * rule by name ("if a catch is load-bearing for resilience, count what it
+         * swallows"), and the exact failure mode the project's own history
+         * already flagged once ("turned a real bug into 'no edges emitted' with
+         * no signal"). Should be zero; non-zero means a bug in
+         * {@code recordResolvedCall}/{@code keyOfTarget}/{@code collector.add}
+         * that the resolve-and-record try/catches don't cover.
+         */
+        int guardedFailures;
         /**
          * In-extraction-set targets whose key was not in the index, so it had to be
          * recomputed from the resolved signature.
@@ -150,18 +163,31 @@ final class EdgeExtractor {
     private void resolveConstruction(ObjectCreationExpr creation, String relativePath, String fromKey) {
         CallSite site = siteOf(creation, relativePath);
         try {
-            ResolvedConstructorDeclaration target = creation.resolve();
-            if (isInExtractionSet(target)) {
-                collector.add(
-                        fromKey, keyOfTarget(target), EdgeType.CALLS, false, Confidence.EXACT, site);
-            } else {
-                stats.externalCalls++;
-            }
+            recordResolvedConstructorCall(creation.resolve(), fromKey, site, Confidence.EXACT);
         } catch (RuntimeException e) {
             recordUnresolved(creation, fromKey, site, reasonFor(e), creation.getType().getNameAsString());
         }
     }
 
+    /**
+     * A method reference — {@code Foo::bar} or {@code Foo::new}.
+     *
+     * <p>Branches on {@link ResolvedConstructorDeclaration} as well as
+     * {@link ResolvedMethodDeclaration}, even though — verified directly against
+     * JavaParser 3.27.0 before assuming otherwise — {@code Type::new} does not
+     * currently resolve to one: {@code MethodReferenceExpr#resolve()} throws
+     * {@code UnsupportedOperationException("Constructor calls not yet
+     * resolvable")} for a constructor reference, so it is caught below and
+     * recorded as {@code unresolved:} rather than silently dropped either way.
+     * The constructor branch is forward-compatible dead code today: if a future
+     * JavaParser version resolves {@code Type::new}, this turns it into a proper
+     * {@code calls} edge instead of leaving it permanently unresolved, with no
+     * further change needed here. See
+     * {@code EdgeExtractorTest#constructorReferencesBecomeUnresolvedRatherThanVanishingWithoutTrace}
+     * for the verified current behaviour, and DECISIONS.md for the full record —
+     * a pre-merge review first reported this as a *silent total loss*, which
+     * probing disproved before the fix was trusted.
+     */
     private void resolveMethodReference(
             MethodReferenceExpr reference, String relativePath, String fromKey) {
         CallSite site = siteOf(reference, relativePath);
@@ -169,7 +195,11 @@ final class EdgeExtractor {
             var resolved = reference.resolve();
             if (resolved instanceof ResolvedMethodDeclaration method) {
                 recordResolvedCall(method, fromKey, site, Confidence.EXACT);
+            } else if (resolved instanceof ResolvedConstructorDeclaration constructor) {
+                recordResolvedConstructorCall(constructor, fromKey, site, Confidence.EXACT);
             }
+            // No other resolved-declaration kind is reachable from a method
+            // reference's resolve() in practice; nothing else to branch on.
         } catch (RuntimeException e) {
             recordUnresolved(reference, fromKey, site, reasonFor(e), reference.getIdentifier());
         }
@@ -177,6 +207,15 @@ final class EdgeExtractor {
 
     private void recordResolvedCall(
             ResolvedMethodDeclaration target, String fromKey, CallSite site, Confidence confidence) {
+        if (!isInExtractionSet(target)) {
+            stats.externalCalls++;
+            return;
+        }
+        collector.add(fromKey, keyOfTarget(target), EdgeType.CALLS, false, confidence, site);
+    }
+
+    private void recordResolvedConstructorCall(
+            ResolvedConstructorDeclaration target, String fromKey, CallSite site, Confidence confidence) {
         if (!isInExtractionSet(target)) {
             stats.externalCalls++;
             return;
@@ -243,11 +282,15 @@ final class EdgeExtractor {
                 .filter(java.util.Objects::nonNull);
     }
 
-    private static void guard(Runnable action) {
+    private void guard(Runnable action) {
         try {
             action.run();
-        } catch (RuntimeException ignored) {
-            // One unresolvable call site costs one edge, not the file.
+        } catch (RuntimeException e) {
+            // One unresolvable call site costs one edge, not the file — but the
+            // cost is counted, never silent (CLAUDE.md, and this project's own
+            // history: an uncounted catch here once turned a real bug into "no
+            // edges emitted" with no signal to find it by).
+            stats.guardedFailures++;
         }
     }
 
@@ -498,11 +541,5 @@ final class EdgeExtractor {
 
     private static CallSite siteOf(com.github.javaparser.ast.Node node, String relativePath) {
         return new CallSite(relativePath, node.getBegin().map(p -> p.line).orElse(0));
-    }
-
-    /** Unused today; kept so the compiler flags an unqualified name mismatch early. */
-    @SuppressWarnings("unused")
-    private static String nameOf(NodeWithSimpleName<?> node) {
-        return node.getNameAsString();
     }
 }

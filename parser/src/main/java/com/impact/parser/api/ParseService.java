@@ -191,7 +191,7 @@ public final class ParseService {
                         k -> {
                             CompletableFuture<Computed> submitted =
                                     CompletableFuture.supplyAsync(
-                                            () -> compute(workspace, includeTests, files), executor);
+                                            () -> compute(probe, files), executor);
                             // Coalescing is for callers that overlap in time; once
                             // the result exists, the next request should trigger a
                             // fresh parse rather than serve an arbitrarily stale one
@@ -223,9 +223,16 @@ public final class ParseService {
                 request.requestId(), request.sha(), request.mode(), computed.layout(), computed.result(), callerDurationMs);
     }
 
-    private Computed compute(Path workspace, boolean includeTests, List<Path> files) {
+    /**
+     * @param layout the same discovery {@link #parse} already ran as {@code
+     *     probe} — discovery is a pure function of (workspace, includeTests), so
+     *     recomputing it here would just be a second filesystem walk for the
+     *     same answer. In full mode that would make discovery run three times
+     *     per request between here, {@code probe}, and {@link
+     *     SourceRootDiscovery#javaFiles}; passing it through keeps it at two.
+     */
+    private Computed compute(WorkspaceLayout layout, List<Path> files) {
         long start = System.currentTimeMillis();
-        WorkspaceLayout layout = SourceRootDiscovery.discover(workspace, includeTests);
         ExtractionResult result =
                 new GraphExtractor(new SourceAndJdkTypeSolverFactory().create(layout))
                         .extract(layout, files);
@@ -313,7 +320,7 @@ public final class ParseService {
         List<ParseError> errors =
                 List.of(new ParseError(request.workspacePath(), describeFailure(cause)));
         ParseDiagnostics diagnostics =
-                new ParseDiagnostics(durationMs, 0, errors, 0, 0, 0.0, 0.0, 0, 0, List.of());
+                new ParseDiagnostics(durationMs, 0, errors, 0, 0, 0.0, 0.0, 0, 0, List.of(), 0, 0, 0);
         return new ParseResponse(
                 request.requestId(),
                 request.sha(),

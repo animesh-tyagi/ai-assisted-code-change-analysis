@@ -168,18 +168,27 @@ final class Declarations {
 
     /**
      * A parse-independent identity for a declaration: absolute file path plus
-     * start line.
+     * start line and column.
      *
      * <p>Node object identity cannot be used, because the same declaration is
      * parsed twice — once by the extractor and once inside
      * {@code JavaParserTypeSolver} — producing two unrelated AST objects. A
      * source position is the same in both.
+     *
+     * <p>Column matters, not just line: two callables can share a start line —
+     * two single-line methods on one line, a record's compact constructor next
+     * to a field, generated or reformatted source — and line-only would collide
+     * them in {@code keysByPosition}, silently losing the earlier one's entry to
+     * the later one's put.
      */
     static Optional<String> positionOf(com.github.javaparser.ast.Node node) {
         return node.findCompilationUnit()
                 .flatMap(CompilationUnit::getStorage)
                 .map(storage -> storage.getPath().toAbsolutePath().normalize().toString())
-                .flatMap(path -> node.getBegin().map(begin -> path + "#" + begin.line));
+                .flatMap(
+                        path ->
+                                node.getBegin()
+                                        .map(begin -> path + "#" + begin.line + ":" + begin.column));
     }
 
     static String simpleNameOf(String fqcn) {

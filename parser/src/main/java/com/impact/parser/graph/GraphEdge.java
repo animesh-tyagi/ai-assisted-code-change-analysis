@@ -1,5 +1,6 @@
 package com.impact.parser.graph;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
 
 /**
@@ -38,6 +39,20 @@ public record GraphEdge(
         return new Key(from, to, type);
     }
 
+    /**
+     * {@code @JsonIgnore} is load-bearing, not decorative. Jackson's default bean
+     * introspection treats any no-arg {@code isXxx()} method on a record as an
+     * extra property, so without this annotation every edge silently grew a 9th
+     * wire field — {@code "unresolved": &lt;bool&gt;} — never declared as a record
+     * component, never mentioned in the Javadoc above, and never in
+     * ARCHITECTURE.md's §8 example. Confirmed present in the golden snapshots
+     * before this was added (a pre-merge review caught it). §8's purity promise —
+     * "everything in it was decided during extraction... a pure record with no
+     * behaviour" ({@link com.impact.parser.api.ParseResponseMapper}) — is only as
+     * true as every method on every serialized type; a convenience accessor is
+     * exactly the kind of thing that slips past that promise silently.
+     */
+    @JsonIgnore
     public boolean isUnresolved() {
         return type == EdgeType.UNRESOLVED;
     }

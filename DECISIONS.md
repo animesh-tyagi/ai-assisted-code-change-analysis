@@ -255,10 +255,17 @@ emitted no call edges through the interface.
 **Chose:** discover **all** implementations of an interface, regardless of annotations.
 - `implements` edges to every impl, always (structural fact: `exact`, `inferred: false`).
 - `calls`-through-interface edges (`inferred: true`) to the impl(s) a call could reach: one impl
-  → `single_impl`; a selector present (`@Primary`, or `@Qualifier` at the injection site) → that
-  impl, `single_impl`; otherwise (several impls, no selector — manual wiring included) → **all**
-  candidates, `ambiguous`. Never guess, never drop.
+  → `single_impl`; several impls where `@Primary` (or, failing that, `@Qualifier`) on the
+  **implementation class** picks out exactly one → that impl, `single_impl`; otherwise (several
+  impls, nothing narrows to one — manual wiring included) → **all** candidates, `ambiguous`.
+  Never guess, never drop.
 - Annotations *narrow or rank* candidates; they do not *gate* whether an impl exists.
+- `@Qualifier` is read from the **implementation's own class**, by presence only — not matched
+  against the value used at the injection site, which v1 does not model (deferred below). So it
+  narrows only in the (common) case where at most one candidate carries `@Qualifier` at all; two
+  differently-valued `@Qualifier`s on two impls both count as "qualified" and neither narrows the
+  other out. `InterfaceDispatchRules.select()` documents this in code; recorded here too so the
+  wording above doesn't overclaim a value match this rule doesn't do.
 **Why:** impact analysis cannot tolerate a false negative. If a call through the interface
 reaches an impl and we emit no edge, a change to that impl shows no callers — the exact blind
 spot the tool exists to prevent. The ambiguous edges are true over-approximations (the call
@@ -409,6 +416,18 @@ stop a rule being written and tested to the same possibly-wrong understanding. `
 is simple enough that the risk is low, but the evidence is genuinely thinner than for the
 other rules, and saying so is cheaper than discovering it later.
 
+**`triggers` + `message_listener`** (`@KafkaListener`/`@RabbitListener`/`@JmsListener`) — built,
+unit-tested (`EntryPointRulesTest$OtherEntryPoints`, including the interface-inheritance and
+same-line-position regression tests added in the pre-merge review), and exercises the same
+`SpringAnnotations.LISTENERS` + `declaredAnnotation` machinery as `scheduled_job`, which *is*
+validated on `observability-final`. Neither real validation repo declares a message listener,
+so unlike `scheduled_job` this rule has never fired against real code — a gap that went
+unrecorded until a pre-merge review noticed it was missing from both tables above.
+
+**Trigger to close:** a validation repo (or an addition to one of the two existing ones) that
+declares a real `@KafkaListener`/`@RabbitListener`/`@JmsListener` method. At that point re-measure
+and move `message_listener` into the validated table alongside `scheduled_job`.
+
 
 ---
 
@@ -502,3 +521,40 @@ repo, showed superlinear growth, which is exactly what `SymbolSolver` is known t
 I set the ceiling at the one point I'd actually verified safe, not projected past it from
 a single sample — and I gated on the extraction list specifically so a huge repo's small
 PRs stay fast, which is the whole reason subset mode exists in the first place."
+
+
+---
+
+## Coalescing key: widened past §8's literal wording (M2 phase 7/9)
+
+### `(workspacePath, mode, sorted files, includeTestSources)`, not `workspacePath` alone
+**Context:** §8's Contract properties list this service's concurrency guarantee as
+"single-flight per `workspacePath`" — literally, one in-flight parse per workspace, full
+stop. `ParseService.coalescingKey()` keys on more than that: workspace, mode
+(`full`/`subset`), the sorted extraction file list, and `includeTestSources`.
+
+**Chose:** the wider key. Two requests against the same `workspacePath` that ask for
+different things — a `full` parse racing a `subset` parse for two files, or the same
+`subset` files with `includeTestSources` flipped — must never coalesce onto one shared
+future: they would produce different, incompatible `ExtractionResult`s, and whichever
+caller loses the race would silently get the other request's answer wearing its own
+`requestId`. §8's literal text does not anticipate that shape of caller, and coalescing
+strictly on `workspacePath` would have made it a live bug rather than a hedge against
+one.
+
+**Why this is narrower/safer, not looser:** a wider coalescing key coalesces callers
+*less* often, never more — it only prevents two genuinely different requests from being
+mistaken for the same work, at the cost (unmeasured, believed small — normal PR/push
+traffic doesn't fire two different-shaped requests at the same workspace within the
+coalescing window) of occasionally doing the same extraction twice when it could
+theoretically have been shared. Trading a small amount of possibly-redundant work for
+never returning the wrong caller's answer to another caller was judged the only
+defensible direction, since the wire contract's purity guarantee (§8: same inputs, same
+output) already implies the *other* direction is a correctness bug, not a performance
+one.
+
+**Not updated in ARCHITECTURE.md's own wording until this pre-merge review** — §8's
+Contract properties bullet still reads "single-flight per `workspacePath`" verbatim,
+which undersells what the implementation actually guards against. Recorded here as the
+accurate description; ARCHITECTURE.md's bullet should be read as shorthand for it, not a
+literal spec the code narrows away from.

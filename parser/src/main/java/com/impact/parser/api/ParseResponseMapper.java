@@ -32,7 +32,10 @@ public final class ParseResponseMapper {
                         result.nonExternalUnresolvedRate(),
                         result.externalCalls(),
                         result.unresolvedParamTypes(),
-                        result.ambiguousOverloads());
+                        result.ambiguousOverloads(),
+                        result.failedDeclarations(),
+                        result.guardedFailures(),
+                        result.targetsMissingFromIndex());
 
         return new ParseResponse(
                 requestId,

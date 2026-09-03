@@ -68,7 +68,10 @@ class ParseControllerInternalFailureTest {
                                 0.0,
                                 0,
                                 0,
-                                List.of()));
+                                List.of(),
+                                0,
+                                0,
+                                0));
 
         when(parseService.parse(any()))
                 .thenThrow(

@@ -25,6 +25,17 @@ import java.util.List;
  *     never confused with a resolution failure.
  * @param unresolvedParamTypes parameter types that fell back to import-based
  *     naming — the measured cost of D2
+ * @param failedDeclarations declarations whose own extraction threw, isolated
+ *     so one unresolvable symbol costs one declaration's edges, never a whole
+ *     file's. Should be zero; non-zero means a real bug, not an expected
+ *     resolution gap.
+ * @param guardedFailures call sites where resolution succeeded but recording
+ *     the resulting edge then threw. Should be zero; non-zero means a bug in
+ *     edge construction, not in symbol resolution.
+ * @param targetsMissingFromIndex in-extraction-set call targets whose key had
+ *     to be recomputed instead of read from the position index. Zero in full
+ *     mode; can be non-zero in subset mode (a known, disclosed gap — see
+ *     DECISIONS.md).
  */
 public record ParseDiagnostics(
         long durationMs,
@@ -36,4 +47,7 @@ public record ParseDiagnostics(
         double nonExternalUnresolvedRate,
         int externalCalls,
         int unresolvedParamTypes,
-        List<String> ambiguousOverloads) {}
+        List<String> ambiguousOverloads,
+        int failedDeclarations,
+        int guardedFailures,
+        int targetsMissingFromIndex) {}

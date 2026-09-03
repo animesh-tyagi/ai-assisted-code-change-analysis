@@ -506,12 +506,20 @@ Request:
   "workspacePath": "/data/work/<repoId>/<sha>",
   "mode": "full",
   "files": ["src/main/java/com/acme/user/UserService.java"],
-  "options": { "includeTestSources": false, "sourceRoots": null }
+  "options": { "includeTestSources": false }
 }
 ```
 `files` is required when `mode` is `"subset"` and ignored when `"full"`.
-When `sourceRoots` is null the service discovers every `**/src/main/java`
-directory and registers a `JavaParserTypeSolver` for each (see **Q3**).
+`options` is always auto-discovery: the service finds every `**/src/main/java`
+(and `**/src/test/java` when `includeTestSources`) directory itself and
+registers a `JavaParserTypeSolver` for each (see **Q3**, `SourceRootDiscovery`).
+An earlier draft of this doc also showed a request-side `sourceRoots` override
+in `options` (letting a caller name source roots explicitly instead of relying
+on discovery); `ParseRequest.ParseOptions` never grew that field, and M2 shipped
+without it — discovery-only, no override path, disclosed here rather than left
+for the example to imply otherwise. The response's own `sourceRoots` field
+below is unaffected — that one *is* implemented, reporting what discovery
+found, not accepting an override.
 
 Response `200`:
 ```json
@@ -563,10 +571,28 @@ Response `200`:
     "totalEdges": 1840,
     "unresolvedEdges": 96,
     "unresolvedRate": 0.052,
-    "ambiguousOverloads": ["…"]
+    "nonExternalUnresolvedRate": 0.0,
+    "externalCalls": 512,
+    "unresolvedParamTypes": 3,
+    "ambiguousOverloads": ["…"],
+    "failedDeclarations": 0,
+    "guardedFailures": 0,
+    "targetsMissingFromIndex": 0
   }
 }
 ```
+`nonExternalUnresolvedRate` is the health signal that alerts (§6.5); `unresolvedRate` is
+diagnostic-only, dominated by expected `external_type` under D2's source+JDK resolution.
+`failedDeclarations`, `guardedFailures` and `targetsMissingFromIndex` should be zero on a
+healthy run — each counts a distinct swallowed-failure path in extraction (isolated
+per-declaration/per-call-site resilience, not a whole-file loss) so a defect there is
+visible on the wire rather than silently folded into "no edges emitted" (see
+`ExtractionResult`'s and `ParseDiagnostics`'s Javadoc for what each counts).
+
+Jackson serializes every declared field of every record on this response, `null` and all
+— there is no TypeScript-style "key omitted when absent" convention on the wire. A field
+typed optional in the TypeScript mirror (`reason`, `candidates` on an edge that isn't
+`unresolved`) still appears as a literal JSON `null`, never a missing key.
 
 Errors: `400` malformed request · `404` `workspacePath` does not exist ·
 `422` no Java source roots found · `413` extraction list exceeds the
@@ -580,7 +606,11 @@ Contract properties:
 - **Pure function of (workspace contents, mode, files, options).** Same inputs, same output — which is what makes graph versions reproducible.
 - **Synchronous.** The caller is already an async worker; a callback would add a state machine for nothing. Client timeout 120s.
 - **Never partial-silently.** Files that fail to parse appear in `diagnostics.parseErrors`; they do not vanish.
-- **Concurrency:** CPU-bound; in-flight parses capped at `cores - 1`, single-flight per `workspacePath`.
+- **Concurrency:** CPU-bound; in-flight parses capped at `cores - 1`, single-flight per
+  `(workspacePath, mode, extraction files, includeTestSources)` — wider than
+  `workspacePath` alone, so two differently-shaped requests against the same workspace
+  (e.g. a `full` parse racing a `subset` one) never coalesce onto one shared result. See
+  DECISIONS.md, "Coalescing key: widened past §8's literal wording".
 
 ### `GET /v1/version`
 ```json

@@ -88,9 +88,18 @@ export interface CallSite {
 // Surfaces (ARCHITECTURE §6.2)
 // ---------------------------------------------------------------------------
 
-/** Non-method nodes: entry points, data, and the unresolved sink. */
+/**
+ * Non-method nodes: entry points and data.
+ *
+ * No `'unresolved'` member: an unbindable call site becomes an edge to an
+ * `unresolved:*` {@link NodeKey} (see {@link EdgeType}'s `unresolved` and
+ * `nodeKey.ts`'s `NodeKind`), never a {@link Surface} record. A prior version
+ * of this type carried an `'unresolved'` value that was never constructed on
+ * either side of the wire — dropped rather than left to describe a shape the
+ * parser never emits.
+ */
 export type SurfaceKind =
-  'http_route' | 'scheduled_job' | 'message_listener' | 'entity' | 'table' | 'unresolved';
+  'http_route' | 'scheduled_job' | 'message_listener' | 'entity' | 'table';
 
 /** Kind-specific surface attributes. All optional; populated per `SurfaceKind`. */
 export interface SurfaceAttrs {

@@ -171,6 +171,57 @@ class EdgeExtractorTest {
         }
 
         @Test
+        void constructorReferencesBecomeUnresolvedRatherThanVanishingWithoutTrace() throws IOException {
+            // A pre-merge review flagged resolveMethodReference for handling only
+            // the ResolvedMethodDeclaration case, hypothesising that Type::new
+            // (which is a constructor reference) would fall through silently —
+            // no edge, no unresolved marker, no counter, nothing. Verified by
+            // probing JavaParser 3.27.0 directly before trusting that claim:
+            // MethodReferenceExpr#resolve() throws UnsupportedOperationException
+            // ("Constructor calls not yet resolvable") for a constructor
+            // reference — it never returns a ResolvedConstructorDeclaration to
+            // fall through on. So the call site was never silently dropped; the
+            // existing catch already turned it into an `unresolved:` edge. The
+            // severity in the original report was overstated — corrected here
+            // rather than left standing.
+            //
+            // The fix keeps its value regardless: resolveMethodReference now
+            // branches on ResolvedConstructorDeclaration too, so if a future
+            // JavaParser version does resolve Type::new, this becomes a proper
+            // `calls` edge to the real constructor instead of staying
+            // permanently unresolved. Today, this test pins the CURRENT
+            // behaviour — unresolved, not silently dropped — so a JavaParser
+            // upgrade that starts resolving it is a visible test change, not a
+            // silent one.
+            writeSource(
+                    "src/main/java/com/acme/Widget.java",
+                    """
+                    package com.acme;
+                    class Widget {
+                        Widget(String name) {}
+                    }
+                    """);
+            writeSource(
+                    "src/main/java/com/acme/Factory.java",
+                    """
+                    package com.acme;
+                    import java.util.function.Function;
+                    class Factory {
+                        Function<String, Widget> supplier() { return Widget::new; }
+                    }
+                    """);
+
+            ExtractionResult result = extract();
+
+            assertThat(edge(result, "fn:com.acme.Factory#supplier()", "fn:com.acme.Widget#<init>(java.lang.String)", EdgeType.CALLS))
+                    .as("not yet resolvable in this JavaParser version — see the comment above")
+                    .isEmpty();
+            assertThat(result.edges())
+                    .as("but the call site is not silently lost — it becomes unresolved:, per section 6.5")
+                    .anyMatch(e -> e.from().equals("fn:com.acme.Factory#supplier()") && e.type() == EdgeType.UNRESOLVED);
+        }
+
+        @Test
         void callsToTheJdkAreCountedButNotGraphed() throws IOException {
             // D2: the impact surface is entirely intra-repo. Nobody can act on a
             // change to java.util.HashMap, and reverse traversal would never walk

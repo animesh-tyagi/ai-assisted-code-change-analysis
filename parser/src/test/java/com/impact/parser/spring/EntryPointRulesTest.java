@@ -327,5 +327,90 @@ class EntryPointRulesTest {
 
             assertThat(extract().surfaces()).isEmpty();
         }
+
+        @Test
+        void anOverrideInheritsAListenerAnnotationLeftOnlyOnTheInterface() throws IOException {
+            // Mirrors InheritedRoutes' generated-API-interface shape, but for
+            // @KafkaListener: the concrete method carries no annotation of its
+            // own, so before the interface-suppression check was generalized to
+            // scheduledJob/messageListener, this produced no surface at all.
+            writeSource(
+                    "src/main/java/com/acme/OrderListener.java",
+                    """
+                    package com.acme;
+                    public interface OrderListener {
+                        @KafkaListener(topics = "orders.created")
+                        void onOrder(String payload);
+                    }
+                    """);
+            writeSource(
+                    "src/main/java/com/acme/OrderListenerImpl.java",
+                    """
+                    package com.acme;
+                    class OrderListenerImpl implements OrderListener {
+                        @Override
+                        public void onOrder(String payload) {}
+                    }
+                    """);
+
+            ExtractionResult result = extract();
+
+            assertThat(surface(result, "listener:kafka:orders.created")).isPresent();
+            assertThat(edge(result, "listener:kafka:orders.created", EdgeType.TRIGGERS))
+                    .isPresent()
+                    .get()
+                    .satisfies(
+                            e ->
+                                    assertThat(e.to())
+                                            .isEqualTo("fn:com.acme.OrderListenerImpl#onOrder(java.lang.String)"));
+        }
+
+        @Test
+        void twoScheduledMethodsOnOneSourceLineGetDistinctSurfaces() throws IOException {
+            // Declarations.keyOfIndexed looks a method's own key up by source
+            // position; the index used to key by line alone, so two callables
+            // starting on the same line (legal Java, and something a formatter
+            // or generator can produce) collided in keysByPosition, and the
+            // second one's entry silently won for both. Column was added to the
+            // position key specifically to prevent this.
+            writeSource(
+                    "src/main/java/com/acme/Two.java",
+                    """
+                    package com.acme;
+                    class Two {
+                        @Scheduled(fixedRate = 1000) void a() {} @Scheduled(fixedRate = 2000) void b() {}
+                    }
+                    """);
+
+            ExtractionResult result = extract();
+
+            assertThat(edge(result, "job:com.acme.Two#a()", EdgeType.TRIGGERS))
+                    .isPresent()
+                    .get()
+                    .satisfies(e -> assertThat(e.to()).isEqualTo("fn:com.acme.Two#a()"));
+            assertThat(edge(result, "job:com.acme.Two#b()", EdgeType.TRIGGERS))
+                    .isPresent()
+                    .get()
+                    .satisfies(e -> assertThat(e.to()).isEqualTo("fn:com.acme.Two#b()"));
+        }
+
+        @Test
+        void anAnnotationDeclaredOnlyOnAnInterfaceMethodProducesNoSurface() throws IOException {
+            // An interface method can never itself be scheduled or invoked as a
+            // listener — there is no bean to run it. Before the fix, the missing
+            // type.isInterface() guard let this produce a job: surface for a
+            // method that can never actually fire.
+            writeSource(
+                    "src/main/java/com/acme/Unimplemented.java",
+                    """
+                    package com.acme;
+                    public interface Unimplemented {
+                        @Scheduled(fixedRate = 5000)
+                        void snapshot();
+                    }
+                    """);
+
+            assertThat(extract().surfaces()).isEmpty();
+        }
     }
 }
