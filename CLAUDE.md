@@ -121,4 +121,16 @@ cd parser && mvn test -Dtest=RealRepoExtractionTest -Dvalidation.observability="
 Note the folder on disk is spelled `oberservability-final`; the docs call the repo
 `observability-final`.
 
+Worker index flow (M3, `mode: "full"` only) — manually triggers the index flow of
+ARCHITECTURE §5.1 against a repo already cloned on disk. Needs Mongo up
+(`npm run dev:infra`) and the parser serving on `:8080` (`mvn spring-boot:run`):
+```bash
+npm run worker:index -- --repo <path> --sha <sha> [--owner <o>] [--name <n>] [--default-branch <b>] [--include-tests]
+```
+`--owner` defaults to `local`, `--name` to the repo directory's basename. A repo
+indexed this way (pre-M6, no GitHub App yet) gets `provider: 'local'` and a
+synthesized `githubRepoId` — see DECISIONS.md, "Local repos before the GitHub App
+exists (M3)". Re-running the same `--sha` is safe (replaces that graph version rather
+than colliding with it) — useful for iterating on the index flow itself.
+
 _Frontend commands land with M7._

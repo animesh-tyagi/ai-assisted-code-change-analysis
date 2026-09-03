@@ -572,3 +572,45 @@ Contract properties bullet still reads "single-flight per `workspacePath`" verba
 which undersells what the implementation actually guards against. Recorded here as the
 accurate description; ARCHITECTURE.md's bullet should be read as shorthand for it, not a
 literal spec the code narrows away from.
+
+---
+
+## Local repos before the GitHub App exists (M3)
+
+**Context:** ARCHITECTURE §7's `repos` schema is GitHub-shaped: `provider: "github"`,
+a non-null `installationId` (an `installations` foreign key), and a `githubRepoId`
+sourced from a real webhook payload. BUILD_PLAN Step 3's CLI trigger — "a CLI/script
+that takes a repo path + SHA, no webhook yet" — needs a `repos` doc to exist so the
+atomic swap (D3) has something to point at, but the GitHub App itself doesn't land
+until M6. Nothing produces a real `installationId` or `githubRepoId` at this point in
+the build.
+
+**Chose:** widen `RepoDoc` rather than invent a parallel schema for CLI-created repos:
+`provider: 'github' | 'local'`, `installationId: ObjectIdString | null`. `githubRepoId`
+stays a required `number` — for `provider: 'local'` it is synthesized deterministically
+from `sha256("owner/name")`, truncated to a negative 31-bit int
+(`worker/src/repos.ts`'s `syntheticGithubRepoId`). Owner/name, not the on-disk repo
+path, so the same logical repo resolves to the same `repos` doc no matter where it's
+checked out or re-run from.
+
+**Why negative, not null:** ARCHITECTURE §7 documents a unique index on
+`{provider, githubRepoId}`. A `null` `githubRepoId` for every local repo would let the
+second CLI-indexed repo collide with the first under that index (Mongo treats repeated
+`null`s as duplicates for a unique index) — forcing either a partial-index exception or
+a second `{owner, name}` index just to route around the first. A synthesized *negative*
+id sidesteps both: real GitHub repo ids are always positive, so a local id can never
+collide with a real one either now or once M6 starts writing real `provider: 'github'`
+rows into the same collection, and the documented index needs no special-casing at all.
+
+**Rejected:** a `{owner, name}` unique index instead (works, but leaves the documented
+`{provider, githubRepoId}` index either unused for local repos or requiring a partial
+filter — more moving parts for the same guarantee); deferring `repos` doc creation
+until M6 (blocks the entire milestone — BUILD_PLAN Step 3 explicitly wants a working
+index flow before the webhook exists); keying on the absolute repo path (breaks the
+moment the same repo is re-cloned somewhere else or indexed from a different machine).
+
+**Interview line:** "The webhook doesn't exist yet, but the index flow needs a `repos`
+doc to swap the pointer on. Rather than invent a second schema for 'repos without a
+GitHub App', I widened the one field that actually needed it and synthesized a
+deterministic negative id — negative so it structurally can never collide with a real
+GitHub repo id once the webhook starts writing real ones into the same collection."
