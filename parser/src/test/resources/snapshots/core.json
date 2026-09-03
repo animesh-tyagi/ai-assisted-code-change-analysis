@@ -1,0 +1,389 @@
+{
+  "requestId" : "snapshot",
+  "sha" : "0000000000000000000000000000000000000000",
+  "mode" : "full",
+  "sourceRoots" : [ "src/main/java" ],
+  "functions" : [ {
+    "key" : "fn:com.acme.Dispatcher#run(com.acme.Strategy)",
+    "fqcn" : "com.acme.Dispatcher",
+    "className" : "Dispatcher",
+    "methodName" : "run",
+    "paramTypes" : [ "com.acme.Strategy" ],
+    "paramNames" : [ "strategy" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/Dispatcher.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:1f582722e997013c731e32a1b39c9d88fa4db9388695cea370936e578b76bda8",
+    "modifiers" : [ ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.Handler#handle(java.lang.String)",
+    "fqcn" : "com.acme.Handler",
+    "className" : "Handler",
+    "methodName" : "handle",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "event" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/Handler.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "modifiers" : [ ],
+    "annotations" : [ ],
+    "isAbstract" : true,
+    "isInterfaceMethod" : true,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.HandlerDispatcher#run(com.acme.Handler)",
+    "fqcn" : "com.acme.HandlerDispatcher",
+    "className" : "HandlerDispatcher",
+    "methodName" : "run",
+    "paramTypes" : [ "com.acme.Handler" ],
+    "paramNames" : [ "handler" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/HandlerDispatcher.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:8b549fd040bdfd2364a603ddf8ebcaa8038acd551e7d1c22733d3b15e9e9f0ab",
+    "modifiers" : [ ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.Job#tick()",
+    "fqcn" : "com.acme.Job",
+    "className" : "Job",
+    "methodName" : "tick",
+    "paramTypes" : [ ],
+    "paramNames" : [ ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/Job.java",
+    "startLine" : 3,
+    "endLine" : 4,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ ],
+    "annotations" : [ {
+      "name" : "Scheduled",
+      "values" : {
+        "fixedRate" : "5000",
+        "initialDelay" : "10"
+      }
+    } ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.LeftHandler#handle(java.lang.String)",
+    "fqcn" : "com.acme.LeftHandler",
+    "className" : "LeftHandler",
+    "methodName" : "handle",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "event" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/LeftHandler.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.PrimaryStrategy#execute(java.lang.String)",
+    "fqcn" : "com.acme.PrimaryStrategy",
+    "className" : "PrimaryStrategy",
+    "methodName" : "execute",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "input" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/PrimaryStrategy.java",
+    "startLine" : 4,
+    "endLine" : 4,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.RightHandler#handle(java.lang.String)",
+    "fqcn" : "com.acme.RightHandler",
+    "className" : "RightHandler",
+    "methodName" : "handle",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "event" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/RightHandler.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.SecondaryStrategy#execute(java.lang.String)",
+    "fqcn" : "com.acme.SecondaryStrategy",
+    "className" : "SecondaryStrategy",
+    "methodName" : "execute",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "input" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/SecondaryStrategy.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.Strategy#execute(java.lang.String)",
+    "fqcn" : "com.acme.Strategy",
+    "className" : "Strategy",
+    "methodName" : "execute",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "input" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/Strategy.java",
+    "startLine" : 3,
+    "endLine" : 3,
+    "bodyHash" : "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "modifiers" : [ ],
+    "annotations" : [ ],
+    "isAbstract" : true,
+    "isInterfaceMethod" : true,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.ThingController#getThing(int)",
+    "fqcn" : "com.acme.ThingController",
+    "className" : "ThingController",
+    "methodName" : "getThing",
+    "paramTypes" : [ "int" ],
+    "paramNames" : [ "id" ],
+    "returnType" : "java.lang.String",
+    "filePath" : "src/main/java/com/acme/ThingController.java",
+    "startLine" : 6,
+    "endLine" : 6,
+    "bodyHash" : "sha256:cd7447c20bebfb7ae969a12df4c49a84888dd2d8a36072ff52f4ec918813aaee",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.api.ThingsApi#getThing(int)",
+    "fqcn" : "com.acme.api.ThingsApi",
+    "className" : "ThingsApi",
+    "methodName" : "getThing",
+    "paramTypes" : [ "int" ],
+    "paramNames" : [ "id" ],
+    "returnType" : "java.lang.String",
+    "filePath" : "src/main/java/com/acme/api/ThingsApi.java",
+    "startLine" : 3,
+    "endLine" : 4,
+    "bodyHash" : "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "modifiers" : [ ],
+    "annotations" : [ {
+      "name" : "GetMapping",
+      "values" : {
+        "value" : "/things/{id}"
+      }
+    } ],
+    "isAbstract" : true,
+    "isInterfaceMethod" : true,
+    "unresolvedParamTypes" : 0
+  } ],
+  "surfaces" : [ {
+    "key" : "job:com.acme.Job#tick()",
+    "kind" : "scheduled_job",
+    "attrs" : {
+      "fixedRate" : "5000",
+      "initialDelay" : "10"
+    }
+  }, {
+    "key" : "route:GET /api/things/{id}",
+    "kind" : "http_route",
+    "attrs" : {
+      "httpMethod" : "GET",
+      "path" : "/api/things/{id}"
+    }
+  } ],
+  "edges" : [ {
+    "from" : "fn:com.acme.Dispatcher#run(com.acme.Strategy)",
+    "to" : "fn:com.acme.PrimaryStrategy#execute(java.lang.String)",
+    "type" : "calls",
+    "inferred" : true,
+    "confidence" : "single_impl",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/Dispatcher.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.Dispatcher#run(com.acme.Strategy)",
+    "to" : "fn:com.acme.Strategy#execute(java.lang.String)",
+    "type" : "calls",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/Dispatcher.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.HandlerDispatcher#run(com.acme.Handler)",
+    "to" : "fn:com.acme.Handler#handle(java.lang.String)",
+    "type" : "calls",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/HandlerDispatcher.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.HandlerDispatcher#run(com.acme.Handler)",
+    "to" : "fn:com.acme.LeftHandler#handle(java.lang.String)",
+    "type" : "calls",
+    "inferred" : true,
+    "confidence" : "ambiguous",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/HandlerDispatcher.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.HandlerDispatcher#run(com.acme.Handler)",
+    "to" : "fn:com.acme.RightHandler#handle(java.lang.String)",
+    "type" : "calls",
+    "inferred" : true,
+    "confidence" : "ambiguous",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/HandlerDispatcher.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.LeftHandler#handle(java.lang.String)",
+    "to" : "fn:com.acme.Handler#handle(java.lang.String)",
+    "type" : "implements",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/LeftHandler.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.PrimaryStrategy#execute(java.lang.String)",
+    "to" : "fn:com.acme.Strategy#execute(java.lang.String)",
+    "type" : "implements",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/PrimaryStrategy.java",
+      "line" : 4
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.RightHandler#handle(java.lang.String)",
+    "to" : "fn:com.acme.Handler#handle(java.lang.String)",
+    "type" : "implements",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/RightHandler.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.SecondaryStrategy#execute(java.lang.String)",
+    "to" : "fn:com.acme.Strategy#execute(java.lang.String)",
+    "type" : "implements",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/SecondaryStrategy.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "fn:com.acme.ThingController#getThing(int)",
+    "to" : "fn:com.acme.api.ThingsApi#getThing(int)",
+    "type" : "implements",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/ThingController.java",
+      "line" : 6
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "job:com.acme.Job#tick()",
+    "to" : "fn:com.acme.Job#tick()",
+    "type" : "triggers",
+    "inferred" : true,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/Job.java",
+      "line" : 3
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  }, {
+    "from" : "route:GET /api/things/{id}",
+    "to" : "fn:com.acme.ThingController#getThing(int)",
+    "type" : "handles",
+    "inferred" : true,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/ThingController.java",
+      "line" : 6
+    } ],
+    "reason" : null,
+    "candidates" : [ ],
+    "unresolved" : false
+  } ],
+  "diagnostics" : {
+    "durationMs" : -1,
+    "filesParsed" : 11,
+    "parseErrors" : [ ],
+    "totalEdges" : 12,
+    "unresolvedEdges" : 0,
+    "unresolvedRate" : 0.0,
+    "nonExternalUnresolvedRate" : 0.0,
+    "externalCalls" : 0,
+    "unresolvedParamTypes" : 0,
+    "ambiguousOverloads" : [ ]
+  }
+}

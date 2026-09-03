@@ -101,6 +101,17 @@ java -jar parser/target/parser-0.1.0.jar --dir <repo> --files a.java,b.java   # 
 ```
 Exit codes: 0 ok, 2 usage error or no Java source roots (§8's 422 case).
 
+Parser golden-master snapshots (M2 phase 8) live in `parser/src/test/resources/snapshots/`
+and cover the **whole** `ParseResponse`, diagnostics included — not just
+functions/surfaces/edges. Updating one is a reviewed two-step action, never a silent
+overwrite: the update run always fails on purpose so the diff gets read before the next
+plain run is allowed to go green.
+```bash
+cd parser && mvn test -Dtest=ParserSnapshotTest -Dsnapshot.update=true   # regenerates, fails on purpose
+git diff parser/src/test/resources/snapshots/                           # review before trusting it
+cd parser && mvn test -Dtest=ParserSnapshotTest                         # must now pass
+```
+
 Validating the parser against the two real repos (DECISIONS, "Validation & eval repos").
 These tests **skip** when the properties are unset, so a plain `mvn test` stays green
 without the checkouts:
