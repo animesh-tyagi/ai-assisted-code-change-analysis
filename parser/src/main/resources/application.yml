@@ -12,6 +12,14 @@ parser:
   version: '@project.version@'
   rule-version: '@parser.ruleVersion@'
   javaparser-version: '@javaparser.version@'
+  scale:
+    # Provisional (ARCHITECTURE §16.1 Q9 / DECISIONS "Provisional scale
+    # ceiling"): set at, not above, the one large-repo point actually measured
+    # safe under source+JDK resolution (D2) — 519 files in 24.3s against a 30s
+    # parse-latency budget. Raise once §17's classpath resolution or
+    # incremental indexing lands, or once more large-repo data narrows the
+    # curve; this is an operational override, not a redeploy.
+    max-files: 500
 
 logging:
   level:

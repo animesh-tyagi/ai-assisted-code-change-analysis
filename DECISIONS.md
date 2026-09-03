@@ -408,3 +408,88 @@ point re-measure and move `overrides` into the validated table.
 stop a rule being written and tested to the same possibly-wrong understanding. `overrides`
 is simple enough that the risk is low, but the evidence is genuinely thinner than for the
 other rules, and saying so is cheaper than discovering it later.
+
+
+---
+
+## Provisional scale ceiling: 500 files (resolves the Q9 pending item, M2 phase 9)
+
+### Set from a real third data point, not extrapolated past it
+**Chose:** `POST /v1/parse` refuses a request whose extraction list (`files.size()` —
+the files that would actually be parsed, not total repo size) exceeds **500**, via
+`parser.scale.max-files` (default 500, operator-overridable). The check runs before the
+coalescing map and before the executor — a request that will be refused spends no CPU and
+consumes no worker slot. Returns `413 Payload Too Large`, distinct from `422` (no Java
+source roots at all): the client needs to tell "wrong path" from "right path, too big for
+v1" apart, since the fix for each is different (re-point vs. narrow to subset mode, or
+wait on §17).
+
+**Why 500, not something derived by formula.** Three measurements exist, and only one of
+them is informative about the *shape* of the cost curve:
+
+| repo | files | wall-clock (extraction only) |
+|---|---|---|
+| observability-final | 71 | ~1.1s |
+| spring-petclinic-rest | 87 | ~1.3s |
+| macrozheng/mall (7 modules) | 519 | 24.3s |
+
+The first two cluster within 20% of each other in file count — they pin the curve's
+*intercept* (parsing is fast at this size) but say nothing about its *slope*. mall is the
+point that matters: files grew ~6x over petclinic while wall-clock grew ~18x. That
+ratio — time outpacing file count — is consistent with `SymbolSolver`'s documented
+tendency toward superlinear cost as cross-file reference density rises, and is exactly the
+risk flagged before this measurement was taken.
+
+With a single large-repo sample, fitting a curve and extrapolating past it (e.g. "this
+implies ~590 files hits 30s, so set N there") would be false confidence dressed as
+precision — one point does not establish a shape reliably enough to extrapolate beyond
+it, particularly for a resolver already known to be capable of superlinear behaviour.
+**500 is therefore set *at, not above*, the one point actually verified safe:** mall's
+519 files completed in 24.3s against the 30s budget below, rounded down slightly for
+run-to-run variance (JVM warm-up, machine load), not projected upward from it.
+
+**The budget is ~30 seconds of parse-latency, not GitHub's ~10s webhook ack.** The ack
+is already decoupled from real work by BullMQ (C6) — the webhook handler enqueues and
+returns in milli, per §9.1's own budget. 30s is instead framed against **tolerable
+PR/push→ready latency**: the time a developer or reviewer actually waits for an
+explanation to appear, which the polling UI (§9.6) reports progressively but which still
+has a human on the other end.
+
+**Deliberately gated on the extraction list, not total repository size.** A repo with
+5,000 files but a PR touching 3 of them must not become impossible to analyse — that
+would defeat D4's entire premise (subset mode parses only touched files, resolving
+against the whole worktree without extracting it). Gating on `files.size()` means only
+`full`-mode indexing of a genuinely huge repo trips the ceiling; a huge repo's ordinary
+PR flow is unaffected. Confirmed by test (`ScaleCeilingTest.subsetModeIsNotGatedByTotalRepoSize`):
+a workspace over the ceiling in total file count, with a two-file subset request, still
+succeeds.
+
+**Rejected:** a formula-derived N from a two-point log-log fit (false precision from
+insufficient data, per above); gating on total repo size instead of the extraction list
+(defeats subset mode); gating on function count (not knowable before parsing — the
+gate has to be cheap and pre-parse, and only file count is free to compute at that
+point; mall itself demonstrates why functions would be a poor proxy anyway — 519 files
+produced 14,143 functions, ~27/file, far above petclinic's ~4.5/file, because
+`mall-mbg` generates heavy MyBatis boilerplate; time correlated with files, not with
+that inflated function count).
+
+**121s clock, not 30s, is still the outer backstop.** The existing 120s client timeout
+(`ParseService.REQUEST_TIMEOUT_SECONDS`) is unchanged and stays as the backstop for a
+*pathologically slow* small repo — pathological in the sense of unusually dense
+cross-references, not merely large — that the file-count gate alone wouldn't catch. The
+500-file ceiling and the 120s timeout are two different defences: one cheap and
+proactive (before any work starts), one expensive and reactive (a circuit breaker for
+the case the first one didn't anticipate).
+
+**Known gap, stated rather than hidden:** the type solver is still built over every
+*solver* root (§8, D1) regardless of mode, so a huge multi-module repo's solver-setup
+cost is not gated by this check even in subset mode — only extraction cost is. mall's
+24.3s measurement was full-mode, so it does not isolate that cost separately. Not
+quantified; noted as a limitation rather than papered over.
+
+**Interview line:** "Two of my three data points were too close together to tell me
+anything about the curve — they only told me the intercept. The third, a real 519-file
+repo, showed superlinear growth, which is exactly what `SymbolSolver` is known to do. So
+I set the ceiling at the one point I'd actually verified safe, not projected past it from
+a single sample — and I gated on the extraction list specifically so a huge repo's small
+PRs stay fast, which is the whole reason subset mode exists in the first place."

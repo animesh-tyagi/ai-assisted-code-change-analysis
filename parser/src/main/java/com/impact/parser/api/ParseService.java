@@ -1,7 +1,9 @@
 package com.impact.parser.api;
 
+import com.impact.parser.api.ParseExceptions.InternalFailureException;
 import com.impact.parser.api.ParseExceptions.MalformedRequestException;
 import com.impact.parser.api.ParseExceptions.WorkspaceNotFoundException;
+import com.impact.parser.api.ParseExceptions.WorkspaceTooLargeException;
 import com.impact.parser.extract.ExtractionResult;
 import com.impact.parser.extract.GraphExtractor;
 import com.impact.parser.extract.ParseError;
@@ -29,6 +31,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -83,15 +86,51 @@ public final class ParseService {
     /** Matches the §8 contract text verbatim: the client-side timeout is 120s. */
     private static final long REQUEST_TIMEOUT_SECONDS = 120;
 
+    /**
+     * Provisional scale ceiling on the number of files one call will extract
+     * (ARCHITECTURE §16.1 Q9; full basis in DECISIONS "Provisional scale
+     * ceiling"). Deliberately gates on {@code files.size()} — the actual
+     * extraction list — rather than total repo size, so a huge repo in
+     * {@code subset} mode with only a handful of touched files is unaffected;
+     * it is specifically {@code full}-mode indexing of a huge repo this exists
+     * to catch, cheaply, before spending any CPU on it.
+     *
+     * <p><strong>How 500 was set.</strong> Three measured points, not two:
+     * observability-final (71 files, ~1.1s) and spring-petclinic-rest (87
+     * files, ~1.3s) cluster too closely to say anything about the curve's
+     * <em>shape</em> — they pin the intercept, not the slope. The third point,
+     * macrozheng/mall (519 files, 7 modules, 24.3s), is the one that matters
+     * here: files grew ~6x over petclinic while wall-clock grew ~18x, a
+     * superlinear relationship consistent with SymbolSolver's known behaviour
+     * on cross-file reference resolution. With only one large-repo sample, an
+     * extrapolated curve fit would be false confidence — so 500 is set{@code
+     * at or below} the one point actually verified safe (519 files in 24.3s
+     * against a ~30s parse-latency budget), not projected past it. The 30s
+     * figure is a PR/push→ready latency budget, not GitHub's ~10s webhook ack
+     * — that ack is already decoupled by BullMQ (C6), so it is irrelevant to
+     * how long extraction itself may run.
+     *
+     * <p>Configurable rather than hardcoded, so raising it later — once §17's
+     * classpath resolution or incremental indexing lands, or once more
+     * large-repo data narrows the curve — is an operational change, not a
+     * redeploy.
+     */
+    private final int maxFiles;
+
     private final ExecutorService executor;
     private final ConcurrentHashMap<String, CompletableFuture<Computed>> inFlight =
             new ConcurrentHashMap<>();
     private final AtomicInteger threadCounter = new AtomicInteger();
 
-    public ParseService() {
+    public ParseService(@Value("${parser.scale.max-files:500}") int maxFiles) {
+        this.maxFiles = maxFiles;
         int cores = Runtime.getRuntime().availableProcessors();
         int workers = Math.max(1, cores - 1);
-        log.info("parse executor: {} worker(s) ({} cores detected)", workers, cores);
+        log.info(
+                "parse executor: {} worker(s) ({} cores detected); scale ceiling {} files",
+                workers,
+                cores,
+                maxFiles);
         this.executor =
                 Executors.newFixedThreadPool(
                         workers,
@@ -130,6 +169,19 @@ public final class ParseService {
         }
 
         List<Path> files = resolveFiles(request, workspace, probe);
+        if (files.size() > maxFiles) {
+            // Fails before touching the coalescing map or the executor — the
+            // whole point is to spend nothing on a request that is going to be
+            // refused, not to queue it behind cores-1 other extractions first.
+            throw new WorkspaceTooLargeException(
+                    files.size()
+                            + " files exceeds the provisional scale ceiling of "
+                            + maxFiles
+                            + " (ARCHITECTURE §16.1 Q9). This is a v1 limit from source+JDK"
+                            + " resolution (D2), not a hard architectural one — see §17 for the"
+                            + " classpath-resolution and incremental-indexing paths that raise it,"
+                            + " or narrow the request to subset mode if only a few files changed.");
+        }
         String key = coalescingKey(workspace, request.mode(), files, includeTests);
 
         long callerStart = System.currentTimeMillis();
@@ -152,15 +204,15 @@ public final class ParseService {
         try {
             computed = future.get(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (ExecutionException e) {
-            return failureResponse(request, callerStart, unwrap(e));
+            Throwable cause = unwrap(e);
+            throw new InternalFailureException(failureResponse(request, callerStart, cause), cause);
         } catch (TimeoutException e) {
-            return failureResponse(
-                    request,
-                    callerStart,
-                    new RuntimeException("parse exceeded " + REQUEST_TIMEOUT_SECONDS + "s"));
+            RuntimeException timedOut =
+                    new RuntimeException("parse exceeded " + REQUEST_TIMEOUT_SECONDS + "s", e);
+            throw new InternalFailureException(failureResponse(request, callerStart, timedOut), timedOut);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return failureResponse(request, callerStart, e);
+            throw new InternalFailureException(failureResponse(request, callerStart, e), e);
         }
 
         // Re-wrapped per caller: the coalesced work is shared, the envelope is not.
@@ -245,11 +297,15 @@ public final class ParseService {
     }
 
     /**
-     * The 500 case: an internal failure that escaped every layer of resilience
-     * already built into extraction. The body still has {@code ParseResponse}
-     * shape — never a bespoke error object — with the failure recorded as a
-     * {@link ParseError} in diagnostics, so a caller inspecting the response can
-     * tell what happened even though the run should not be trusted (§8).
+     * Builds the 500 body: an internal failure that escaped every layer of
+     * resilience already built into extraction. The body still has
+     * {@code ParseResponse} shape — never a bespoke error object — with the
+     * failure recorded as a {@link ParseError} in diagnostics, so a caller
+     * inspecting the response can tell what happened even though the run should
+     * not be trusted (§8). Carried out of {@link #parse} inside an
+     * {@link InternalFailureException} so {@link ParseController} can attach the
+     * 500 status code — this method only builds the body, it does not decide the
+     * transport.
      */
     private static ParseResponse failureResponse(ParseRequest request, long start, Throwable cause) {
         log.error("parse failed for workspacePath={}", request.workspacePath(), cause);

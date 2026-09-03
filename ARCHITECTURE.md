@@ -569,8 +569,11 @@ Response `200`:
 ```
 
 Errors: `400` malformed request · `404` `workspacePath` does not exist ·
-`422` no Java source roots found · `500` internal failure, body still carrying
-`diagnostics` so a partial failure is diagnosable.
+`422` no Java source roots found · `413` extraction list exceeds the
+provisional scale ceiling (§16.1 Q9) — distinct from 422, since the client
+needs to tell "wrong path" from "right path, too big for v1" apart · `500`
+internal failure, body still carrying `diagnostics` so a partial failure is
+diagnosable.
 
 Contract properties:
 
@@ -986,9 +989,10 @@ object small and the boundary clean.
 `analyses` and `explanations` — keep indefinitely (they are small, and they make
 the eval corpus), or TTL them?
 
-**Q9 — Scale ceiling.** Sizing assumes 50–300 files and a seconds-long full parse.
-What is the hard cap at which indexing should fail loudly, rather than silently
-taking minutes and blowing the PR→ready latency budget?
+**Q9 — Scale ceiling.** *(Resolved in M2 phase 9 — see §16.1.)* Sizing assumes
+50–300 files and a seconds-long full parse. What is the hard cap at which
+indexing should fail loudly, rather than silently taking minutes and blowing
+the PR→ready latency budget?
 
 **Q10 — Frontend graph size.** *Assumption:* the force-directed view caps at ~150
 nodes, collapsing beyond that. Confirm the cap and the collapse behaviour.
@@ -1038,15 +1042,33 @@ Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone
 - **Q8 (retention):** **keep** `analyses` and `explanations` indefinitely — both
   are small, and together they are the eval corpus (§DECISIONS "An eval is the
   differentiator").
-- **Q9 (scale ceiling):** deferred to M2 — pick the hard file/edge cap once real
-  parse timings exist against both target repos, rather than guess a number now.
+- **Q9 (scale ceiling):** **resolved, provisionally, in M2 phase 9.** A hard cap
+  of **500 files** on the extraction list (`files.size()`, so subset-mode
+  requests against a huge repo are unaffected — only what would actually be
+  parsed is gated), enforced by `POST /v1/parse` before any CPU is spent, via
+  `parser.scale.max-files` (default 500). Basis: observability-final (71
+  files, ~1.1s) and spring-petclinic-rest (87 files, ~1.3s) cluster too
+  closely to reveal the curve's shape — they pin the intercept, not the
+  slope. A third point, macrozheng/mall (519 files, 7 modules, 24.3s
+  wall-clock), is the one that matters: files grew ~6x over petclinic while
+  time grew ~18x — superlinear, consistent with `SymbolSolver`'s known
+  behaviour on cross-file resolution. With one large-repo sample, an
+  extrapolated fit would be false confidence, so 500 is set *at, not above*,
+  the one point actually measured safe against a **~30s parse-latency
+  budget** — framed against tolerable PR/push→ready latency, not GitHub's
+  ~10s webhook ack, which BullMQ already decouples (C6). Full reasoning:
+  DECISIONS "Provisional scale ceiling". Raise it once §17's classpath
+  resolution or incremental indexing lands, or once more large-repo data
+  narrows the curve.
 - **Q10 (frontend graph cap):** ~150 nodes, collapse beyond that. Confirmed;
-  revisit visually in M7.---
+  revisit visually in M7.
+
+---
 
 ## 17. Roadmap (documented, not built)
 
 - **Classpath type resolution** — `mvn dependency:build-classpath` / the Gradle equivalent, a `JarTypeSolver` per jar, cached per `pom.xml` / `build.gradle` hash. Sits behind the TypeSolver interface from D2, so it lands without touching the graph model or node keys. Fixes the overload limitation (§6.6). *Trigger:* `unresolvedRate` persistently high enough to degrade explanations.
-- **Incremental indexing** — dirty-set expansion (re-parse changed files plus files whose resolution depends on them), with a periodic full rebuild as a correctness backstop. *Trigger:* full re-index time exceeding an acceptable webhook-to-ready latency.
+- **Incremental indexing** — dirty-set expansion (re-parse changed files plus files whose resolution depends on them), with a periodic full rebuild as a correctness backstop. *Trigger:* full re-index time exceeding an acceptable webhook-to-ready latency — concretely, a real repo hitting the 500-file provisional ceiling (§16.1 Q9).
 - **Inherited CRUD through a Spring-Data-typed reference** — `queries` edges for `save` / `findById` / `findAll` / `delete` / `count` called on a reference whose declared type is the Spring Data interface itself, rather than an in-repo domain interface. Deferred because the shape exists in neither validation repo, so building it now would ship a rule covered only by author-written fixtures — the thing the no-toy-examples convention exists to prevent. Degrades to `external_type`, so the alerting metric stays honest. *Trigger:* a validation repo that calls inherited CRUD on a reference typed as the Spring Data interface.
 - **Claim-level citations** (§11.4).
 - **Rename-crossing change history** (§12).
