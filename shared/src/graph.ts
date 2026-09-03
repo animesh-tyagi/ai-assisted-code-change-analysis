@@ -183,15 +183,28 @@ export interface InstallationDoc {
   updatedAt: Date;
 }
 
-/** `repos` — `currentGraphVersionId` is the pointer flipped by the atomic swap (D3). */
+/**
+ * `repos` — `currentGraphVersionId` is the pointer flipped by the atomic swap (D3).
+ *
+ * `provider`/`installationId` are widened past ARCHITECTURE §7's literal, purely
+ * GitHub-shaped text: M3's CLI trigger (BUILD_PLAN Step 3) indexes repos before
+ * the GitHub App exists (M6), so a repo can arrive with no installation at all.
+ * `provider: 'local'` marks that case; `githubRepoId` is still required and
+ * unique per `{provider, githubRepoId}`; for `provider: 'local'` it is
+ * synthesized deterministically from `owner`/`name` (see `worker/src/repos.ts`)
+ * rather than left null, so the documented unique index needs no partial-index
+ * special-casing. M6 creates real `provider: 'github'` repos from webhook data
+ * with a real `installationId`. See DECISIONS.md, "Local repos before the
+ * GitHub App exists (M3)".
+ */
 export interface RepoDoc {
   _id: ObjectIdString;
-  provider: 'github';
+  provider: 'github' | 'local';
   githubRepoId: number;
   owner: string;
   name: string;
   defaultBranch: string;
-  installationId: ObjectIdString;
+  installationId: ObjectIdString | null;
   currentGraphVersionId: ObjectIdString | null;
   indexingStatus: GraphVersionStatus | 'idle';
   lastIndexedSha: Sha | null;

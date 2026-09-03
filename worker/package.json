@@ -10,6 +10,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
-    "@impact/shared": "*"
+    "@impact/shared": "*",
+    "mongodb": "^6.11.0"
   }
 }
