@@ -88,9 +88,18 @@ export interface CallSite {
 // Surfaces (ARCHITECTURE §6.2)
 // ---------------------------------------------------------------------------
 
-/** Non-method nodes: entry points, data, and the unresolved sink. */
+/**
+ * Non-method nodes: entry points and data.
+ *
+ * No `'unresolved'` member: an unbindable call site becomes an edge to an
+ * `unresolved:*` {@link NodeKey} (see {@link EdgeType}'s `unresolved` and
+ * `nodeKey.ts`'s `NodeKind`), never a {@link Surface} record. A prior version
+ * of this type carried an `'unresolved'` value that was never constructed on
+ * either side of the wire — dropped rather than left to describe a shape the
+ * parser never emits.
+ */
 export type SurfaceKind =
-  'http_route' | 'scheduled_job' | 'message_listener' | 'entity' | 'table' | 'unresolved';
+  'http_route' | 'scheduled_job' | 'message_listener' | 'entity' | 'table';
 
 /** Kind-specific surface attributes. All optional; populated per `SurfaceKind`. */
 export interface SurfaceAttrs {
@@ -124,8 +133,31 @@ export interface GraphVersionStats {
   functions: number;
   edges: number;
   surfaces: number;
-  /** unresolvedEdges / totalEdges — the health metric of ARCHITECTURE §6.5. */
+  /**
+   * All unresolved edges / total edges (ARCHITECTURE §6.5).
+   *
+   * Diagnostic, **not** an alerting metric. It is dominated by `external_type`,
+   * which is expected under source+JDK resolution — petclinic-rest sits above
+   * 50% while its non-external rate is 0. Read it as the D2 upgrade trigger:
+   * when it grows large enough to degrade explanations, classpath resolution is
+   * what fixes it.
+   */
   unresolvedRate: number;
+  /**
+   * Unresolved edges excluding `external_type`, over total edges.
+   *
+   * **This is the health signal that alerts.** A rise means genuine blindness:
+   * an in-repo call we failed to bind, an overload we could not disambiguate, a
+   * file that would not parse. 0.0% in both validation repos today.
+   */
+  nonExternalUnresolvedRate: number;
+  /**
+   * Calls that resolved but whose target sits outside the extraction set —
+   * the JDK, third-party jars, and generated sources the solver reads but never
+   * extracts (§6.5 bucket 2). Not edges; counted so the omission is visible and
+   * never confused with a resolution failure.
+   */
+  externalCalls: number;
   parseErrors: number;
 }
 

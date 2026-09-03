@@ -1,0 +1,53 @@
+package com.impact.parser.api;
+
+import com.impact.parser.extract.ParseError;
+import java.util.List;
+
+/**
+ * Whether this run should be trusted (ARCHITECTURE.md §8, §6.5).
+ *
+ * <p>Diagnostics are not optional colour. The graph is an over-approximation built
+ * under source+JDK resolution, and these fields are how a consumer tells a healthy
+ * run from a quietly degraded one.
+ *
+ * @param parseErrors files that failed; never silently dropped, because a missing
+ *     file takes its functions with it and they then look uncalled
+ * @param unresolvedRate all unresolved edges over total. Diagnostic only — it is
+ *     dominated by {@code external_type}, which is expected under D2. This is the
+ *     D2 upgrade trigger, not an alarm.
+ * @param nonExternalUnresolvedRate the same, excluding {@code external_type}.
+ *     <strong>This is the health signal that alerts</strong>: a rise means real
+ *     blindness — an in-repo call we could not bind, an ambiguous overload, a
+ *     parse failure. 0.0% on both validation repos.
+ * @param externalCalls calls that resolved but whose target is outside the
+ *     extraction set — the JDK, jars, and generated sources the solver reads but
+ *     never extracts. Not edges; counted so the omission stays visible and is
+ *     never confused with a resolution failure.
+ * @param unresolvedParamTypes parameter types that fell back to import-based
+ *     naming — the measured cost of D2
+ * @param failedDeclarations declarations whose own extraction threw, isolated
+ *     so one unresolvable symbol costs one declaration's edges, never a whole
+ *     file's. Should be zero; non-zero means a real bug, not an expected
+ *     resolution gap.
+ * @param guardedFailures call sites where resolution succeeded but recording
+ *     the resulting edge then threw. Should be zero; non-zero means a bug in
+ *     edge construction, not in symbol resolution.
+ * @param targetsMissingFromIndex in-extraction-set call targets whose key had
+ *     to be recomputed instead of read from the position index. Zero in full
+ *     mode; can be non-zero in subset mode (a known, disclosed gap — see
+ *     DECISIONS.md).
+ */
+public record ParseDiagnostics(
+        long durationMs,
+        int filesParsed,
+        List<ParseError> parseErrors,
+        int totalEdges,
+        long unresolvedEdges,
+        double unresolvedRate,
+        double nonExternalUnresolvedRate,
+        int externalCalls,
+        int unresolvedParamTypes,
+        List<String> ambiguousOverloads,
+        int failedDeclarations,
+        int guardedFailures,
+        int targetsMissingFromIndex) {}

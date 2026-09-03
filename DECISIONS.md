@@ -255,10 +255,17 @@ emitted no call edges through the interface.
 **Chose:** discover **all** implementations of an interface, regardless of annotations.
 - `implements` edges to every impl, always (structural fact: `exact`, `inferred: false`).
 - `calls`-through-interface edges (`inferred: true`) to the impl(s) a call could reach: one impl
-  → `single_impl`; a selector present (`@Primary`, or `@Qualifier` at the injection site) → that
-  impl, `single_impl`; otherwise (several impls, no selector — manual wiring included) → **all**
-  candidates, `ambiguous`. Never guess, never drop.
+  → `single_impl`; several impls where `@Primary` (or, failing that, `@Qualifier`) on the
+  **implementation class** picks out exactly one → that impl, `single_impl`; otherwise (several
+  impls, nothing narrows to one — manual wiring included) → **all** candidates, `ambiguous`.
+  Never guess, never drop.
 - Annotations *narrow or rank* candidates; they do not *gate* whether an impl exists.
+- `@Qualifier` is read from the **implementation's own class**, by presence only — not matched
+  against the value used at the injection site, which v1 does not model (deferred below). So it
+  narrows only in the (common) case where at most one candidate carries `@Qualifier` at all; two
+  differently-valued `@Qualifier`s on two impls both count as "qualified" and neither narrows the
+  other out. `InterfaceDispatchRules.select()` documents this in code; recorded here too so the
+  wording above doesn't overclaim a value match this rule doesn't do.
 **Why:** impact analysis cannot tolerate a false negative. If a call through the interface
 reaches an impl and we emit no edge, a change to that impl shows no callers — the exact blind
 spot the tool exists to prevent. The ambiguous edges are true over-approximations (the call
@@ -270,3 +277,298 @@ creates the false-negative blind spot. No new `confidence` value needed — `amb
 **Interview line:** "For virtual dispatch I over-approximate to all reachable implementations
 with an 'ambiguous' confidence, because in impact analysis a false negative — silently missing a
 caller — is far more dangerous than a hedged false positive."
+
+
+---
+
+## Pending decisions
+
+Open items awaiting a call. Each states the evidence and the intended default so work can
+proceed; move it into the body above once decided.
+
+_(resolved — moved to "Spring Data repository detection" below)_
+
+
+---
+
+## Spring Data repository detection (resolves the ebce603 pending item)
+
+### Match the whole family rooted at `Repository<T,ID>`, gated on the import
+**Chose:** an interface is a Spring Data repository if it extends any member of the
+family rooted at `org.springframework.data.repository.Repository<T,ID>` —
+`CrudRepository`, `PagingAndSortingRepository` and `JpaRepository` all extend it. `T` is
+taken from whichever marker appears. Detection is gated on the supertype's **import**
+resolving to `org.springframework.data.repository.*`, never on the bare name
+`Repository`, which is far too common to match safely.
+**Why:** §6.4 originally named only `JpaRepository` / `CrudRepository` /
+`PagingAndSortingRepository`. `spring-petclinic-rest` — the repo chosen specifically to
+validate this rule — uses **none** of them: all seven of its repositories extend the base
+marker directly (`SpringDataOwnerRepository extends OwnerRepository, Repository<Owner,
+Integer>`). Measured: `grep` for the three named interfaces returns **0 files**. The
+narrow rule would have matched nothing in the only repo able to prove it works.
+`Repository<T,ID>` is the root the other three extend, so matching it is strictly more
+general and cannot lose a match.
+**Split-interface shape:** the marker often sits on a sub-interface that extends an
+in-repo domain interface which declares the actual methods. `T` therefore binds to
+methods reachable through the marker interface's in-repo super-interface chain, and
+`queries` edges are emitted at those method **declarations**, not at call sites. That
+composes with the existing bucket-1 `calls` edges rather than duplicating them:
+`entity:Owner ← queries ← OwnerRepository#findByLastName ← calls ← ClinicServiceImpl`.
+**Interview line:** "The canonical PetClinic doesn't use `JpaRepository` at all — it uses
+the base `Repository` marker — so I matched the family root instead of the popular
+subclass, and gated it on the resolved import rather than the bare type name."
+
+### Deferred: inherited CRUD called through a Spring-Data-typed reference
+**Chose:** do **not** yet emit `queries` edges for inherited CRUD (`save`, `findById`,
+`findAll`, `delete`, `count`) invoked on a reference whose declared type is the Spring
+Data interface itself.
+**Why:** that shape (`interface UserRepo extends JpaRepository<User,Long> {}` then
+`userRepo.save(u)`) exists in **neither** validation repo. petclinic's services hold the
+plain in-repo interfaces (`private final OwnerRepository ownerRepository`), so their
+repository calls already resolve in-repo and are bucket-1 `calls` edges — never
+`external_type`. Building the sub-rule now would ship it covered only by author-written
+fixtures, which is exactly what the "no toy examples" convention exists to prevent.
+**Degrades gracefully:** such calls land in `external_type`, so `nonExternalUnresolvedRate`
+— the alerting metric — stays 0 and nothing looks broken.
+**Roadmap trigger:** a validation repo that calls inherited CRUD
+(`save`/`findById`/`findAll`/…) on a reference typed as the Spring Data interface.
+
+
+---
+
+## Route inheritance from implemented interfaces (M2 phase 5)
+
+### A controller inherits its route mapping from any interface it implements
+**Chose:** when a controller method declares no method-level mapping, take it from the
+corresponding method on any implemented or overridden interface — in-repo **or**
+solver-only, including OpenAPI-generated API interfaces under `target/generated-sources`
+— concatenated with the controller's own class-level mapping. The surface and `handles`
+edge attach to the in-repo controller method; the generated interface gets no node.
+**Why:** measured. `spring-petclinic-rest` yielded **1 route** before this and **37**
+after — exactly the 37 endpoints its OpenAPI spec declares. Its controllers carry only
+`@RequestMapping("/api")`; every method-level mapping lives on the generated interface.
+Without inheritance the route rule is near-useless wherever OpenAPI codegen is used, and
+a controller method with no route surface looks dead — so a change to it would appear to
+affect nobody, the exact failure this product exists to prevent.
+**Confirmed mechanism:** annotations are readable off an AST reached through the type
+solver even though that parse carries no symbol resolver, because annotations are matched
+by *name* off the raw AST (D2) and need no resolution at all. Pinned by a test built on
+the generated-interface shape.
+**Two corrections the real repos forced:**
+- A mapping on an *interface* method emits no surface of its own. Spring serves a route
+  only through a concrete request-handling bean; emitting one represented a single
+  endpoint twice — unprefixed on the interface, prefixed on the controller — which would
+  inflate the entry-point count reverse traversal reports.
+- Constant paths (`value = OwnersApi.PATH_DELETE_OWNER`) are resolved to their string
+  initialiser. A `static final String` is statically knowable, unlike a `${property}`
+  placeholder, which stays verbatim and `ambiguous`. Before this the route *count* was
+  right and every *path* was wrong — worse than useless in an explanation.
+**Interview line:** "PetClinic's routes live on OpenAPI-generated interfaces, not on the
+controllers — so I inherit the mapping through the type hierarchy and attach the route to
+the hand-written method. That took the route count from 1 to the full 37 the spec declares."
+
+
+---
+
+## Validation coverage (M2)
+
+Which edge and surface types are proven against **real code**, and which are only
+fixture-tested. This is not the roadmap: everything below is *built and passing*. The
+distinction is what evidence stands behind each rule, so nobody later mistakes a green
+test suite for real-world proof.
+
+Measured on `observability-final` (71 files / 360 fns) and `spring-petclinic-rest`
+(87 files / 388 fns).
+
+### Validated against real code
+
+| Rule | Evidence |
+|---|---|
+| `calls` (resolved, intra-repo) | 333 in observability, 462 in petclinic |
+| `unresolved` + `external` split | 22 / 483 unresolved, all `external_type`; **nonExternalUnresolvedRate 0.0% in both** |
+| `implements` (structural, annotation-independent) | 8 in observability (the four hand-wired `FailureStrategy` impls), 108 in petclinic |
+| interface **dispatch** (`calls` → impls) | +8 observability, +129 petclinic; petclinic's three profile-scoped impls per repository interface exercise the `ambiguous` path, observability's unannotated impls exercise annotation-independent discovery |
+| `handles` + `http_route`, **including inheritance** | 21 observability; petclinic 1 → 37, matching the 37 endpoints its OpenAPI spec declares |
+| `triggers` + `scheduled_job` | 1 in observability (`MetricsAggregator`) |
+| `queries` + `maps_to` + entity/table surfaces | 43 / 7 in petclinic, 7 entity + 7 table surfaces; **composition verified on the real repo** — 57 nodes reverse-reachable from `entity:…model.Owner`, reaching `OwnerRepository` → `ClinicService` → REST controllers → route surfaces |
+| determinism (§8 purity) | byte-identical across repeated runs on both real trees |
+
+### Fixture-only
+
+**`overrides`** — built, unit-tested (`subclassMethodsOverrideTheirSuperclass`), and
+measured at **0 in both repos**. That zero is *semantically correct*, not a bug: every
+`@Override` in either repo either implements an in-repo interface (correctly emitted as
+`implements`) or overrides `java.lang.Object#toString` / a framework interface, and
+external supertypes are deliberately skipped because nobody can act on a change to them.
+Verified by inspection: neither repo contains an in-repo class-extends-class method
+override anywhere. `NamedEntity#toString` and `Owner#toString` both override `Object`.
+
+So the rule's *code path* is proven by fixture and its *absence* is proven correct on real
+code — but it has never fired against a real hierarchy, which is weaker evidence than
+every row above.
+
+**Trigger to close:** a validation repo containing an in-repo class-extends-class method
+override (a subclass overriding a superclass method, both in the extraction set). At that
+point re-measure and move `overrides` into the validated table.
+
+**Why this is recorded rather than deferred:** the "no toy examples" convention exists to
+stop a rule being written and tested to the same possibly-wrong understanding. `overrides`
+is simple enough that the risk is low, but the evidence is genuinely thinner than for the
+other rules, and saying so is cheaper than discovering it later.
+
+**`triggers` + `message_listener`** (`@KafkaListener`/`@RabbitListener`/`@JmsListener`) — built,
+unit-tested (`EntryPointRulesTest$OtherEntryPoints`, including the interface-inheritance and
+same-line-position regression tests added in the pre-merge review), and exercises the same
+`SpringAnnotations.LISTENERS` + `declaredAnnotation` machinery as `scheduled_job`, which *is*
+validated on `observability-final`. Neither real validation repo declares a message listener,
+so unlike `scheduled_job` this rule has never fired against real code — a gap that went
+unrecorded until a pre-merge review noticed it was missing from both tables above.
+
+**Trigger to close:** a validation repo (or an addition to one of the two existing ones) that
+declares a real `@KafkaListener`/`@RabbitListener`/`@JmsListener` method. At that point re-measure
+and move `message_listener` into the validated table alongside `scheduled_job`.
+
+**Fixed during this same review, not just disclosed:** triaging `message_listener` specifically
+(prompted by a separate reuse finding about duplicated annotation-member reading) surfaced a real
+bug in it — `topics`/`queues`/`destination` can legally be array-valued
+(`@KafkaListener(topics = {"a", "b"})`), and the rule read the member's raw source text straight
+into a `{}"`-stripping regex, which for two or more elements silently concatenated them into one
+comma-joined, semantically meaningless key (`listener:kafka:a, b`) instead of picking one — unlike
+`@RequestMapping` arrays, which already took-first via `SpringAnnotations.firstValue`. Verified
+empirically (a throwaway probe test, since deleted) before fixing: confirmed the exact garbled
+output, confirmed `@RequestMapping`/`@GetMapping` arrays were unaffected (already correct via
+`firstValue`), then factored the unwrap into `SpringAnnotations.firstElement` so both call sites
+share one implementation instead of the topic-extraction growing its own — the same
+divergence-hazard `keyOfIndexed` was introduced to close elsewhere. Regression test added and
+mutation-verified (fails without the fix, passes with it).
+
+
+---
+
+## Provisional scale ceiling: 500 files (resolves the Q9 pending item, M2 phase 9)
+
+### Set from a real third data point, not extrapolated past it
+**Chose:** `POST /v1/parse` refuses a request whose extraction list (`files.size()` —
+the files that would actually be parsed, not total repo size) exceeds **500**, via
+`parser.scale.max-files` (default 500, operator-overridable). The check runs before the
+coalescing map and before the executor — a request that will be refused spends no CPU and
+consumes no worker slot. Returns `413 Payload Too Large`, distinct from `422` (no Java
+source roots at all): the client needs to tell "wrong path" from "right path, too big for
+v1" apart, since the fix for each is different (re-point vs. narrow to subset mode, or
+wait on §17).
+
+**Why 500, not something derived by formula.** Three measurements exist, and only one of
+them is informative about the *shape* of the cost curve:
+
+| repo | files | wall-clock (extraction only) |
+|---|---|---|
+| observability-final | 71 | ~1.1s |
+| spring-petclinic-rest | 87 | ~1.3s |
+| macrozheng/mall @ `0504e86` (7 modules) | 519 | 24.3s |
+
+(`0504e86b1f1b6f1b8aa6a734d37a90fb67346be7`, cloned shallow for this measurement and
+deleted afterward — the clone was 29MB, not the ~500MB estimated at the time; it lived
+outside the repo entirely, at the sibling directory `_validation/`, so no gitignore
+entry was ever needed or possible.)
+
+The first two cluster within 20% of each other in file count — they pin the curve's
+*intercept* (parsing is fast at this size) but say nothing about its *slope*. mall is the
+point that matters: files grew ~6x over petclinic while wall-clock grew ~18x. That
+ratio — time outpacing file count — is consistent with `SymbolSolver`'s documented
+tendency toward superlinear cost as cross-file reference density rises, and is exactly the
+risk flagged before this measurement was taken. Read as a single power-law point relative
+to the small-repo baseline (~1.2s at ~79 files, the observability/petclinic average),
+`time ∝ files^n` gives `n ≈ ln(24.3/1.2) / ln(519/79) ≈ 1.6` — noted as a rough exponent
+for future reference, not as a trustworthy fitted curve; see the extrapolation warning
+immediately below.
+
+With a single large-repo sample, fitting a curve and extrapolating past it (e.g. "this
+implies ~590 files hits 30s, so set N there") would be false confidence dressed as
+precision — one point does not establish a shape reliably enough to extrapolate beyond
+it, particularly for a resolver already known to be capable of superlinear behaviour.
+**500 is therefore set *at, not above*, the one point actually verified safe:** mall's
+519 files completed in 24.3s against the 30s budget below, rounded down slightly for
+run-to-run variance (JVM warm-up, machine load), not projected upward from it.
+
+**The budget is ~30 seconds of parse-latency, not GitHub's ~10s webhook ack.** The ack
+is already decoupled from real work by BullMQ (C6) — the webhook handler enqueues and
+returns in milli, per §9.1's own budget. 30s is instead framed against **tolerable
+PR/push→ready latency**: the time a developer or reviewer actually waits for an
+explanation to appear, which the polling UI (§9.6) reports progressively but which still
+has a human on the other end.
+
+**Deliberately gated on the extraction list, not total repository size.** A repo with
+5,000 files but a PR touching 3 of them must not become impossible to analyse — that
+would defeat D4's entire premise (subset mode parses only touched files, resolving
+against the whole worktree without extracting it). Gating on `files.size()` means only
+`full`-mode indexing of a genuinely huge repo trips the ceiling; a huge repo's ordinary
+PR flow is unaffected. Confirmed by test (`ScaleCeilingTest.subsetModeIsNotGatedByTotalRepoSize`):
+a workspace over the ceiling in total file count, with a two-file subset request, still
+succeeds.
+
+**Rejected:** a formula-derived N from a two-point log-log fit (false precision from
+insufficient data, per above); gating on total repo size instead of the extraction list
+(defeats subset mode); gating on function count (not knowable before parsing — the
+gate has to be cheap and pre-parse, and only file count is free to compute at that
+point; mall itself demonstrates why functions would be a poor proxy anyway — 519 files
+produced 14,143 functions, ~27/file, far above petclinic's ~4.5/file, because
+`mall-mbg` generates heavy MyBatis boilerplate; time correlated with files, not with
+that inflated function count).
+
+**121s clock, not 30s, is still the outer backstop.** The existing 120s client timeout
+(`ParseService.REQUEST_TIMEOUT_SECONDS`) is unchanged and stays as the backstop for a
+*pathologically slow* small repo — pathological in the sense of unusually dense
+cross-references, not merely large — that the file-count gate alone wouldn't catch. The
+500-file ceiling and the 120s timeout are two different defences: one cheap and
+proactive (before any work starts), one expensive and reactive (a circuit breaker for
+the case the first one didn't anticipate).
+
+**Known gap, stated rather than hidden:** the type solver is still built over every
+*solver* root (§8, D1) regardless of mode, so a huge multi-module repo's solver-setup
+cost is not gated by this check even in subset mode — only extraction cost is. mall's
+24.3s measurement was full-mode, so it does not isolate that cost separately. Not
+quantified; noted as a limitation rather than papered over.
+
+**Interview line:** "Two of my three data points were too close together to tell me
+anything about the curve — they only told me the intercept. The third, a real 519-file
+repo, showed superlinear growth, which is exactly what `SymbolSolver` is known to do. So
+I set the ceiling at the one point I'd actually verified safe, not projected past it from
+a single sample — and I gated on the extraction list specifically so a huge repo's small
+PRs stay fast, which is the whole reason subset mode exists in the first place."
+
+
+---
+
+## Coalescing key: widened past §8's literal wording (M2 phase 7/9)
+
+### `(workspacePath, mode, sorted files, includeTestSources)`, not `workspacePath` alone
+**Context:** §8's Contract properties list this service's concurrency guarantee as
+"single-flight per `workspacePath`" — literally, one in-flight parse per workspace, full
+stop. `ParseService.coalescingKey()` keys on more than that: workspace, mode
+(`full`/`subset`), the sorted extraction file list, and `includeTestSources`.
+
+**Chose:** the wider key. Two requests against the same `workspacePath` that ask for
+different things — a `full` parse racing a `subset` parse for two files, or the same
+`subset` files with `includeTestSources` flipped — must never coalesce onto one shared
+future: they would produce different, incompatible `ExtractionResult`s, and whichever
+caller loses the race would silently get the other request's answer wearing its own
+`requestId`. §8's literal text does not anticipate that shape of caller, and coalescing
+strictly on `workspacePath` would have made it a live bug rather than a hedge against
+one.
+
+**Why this is narrower/safer, not looser:** a wider coalescing key coalesces callers
+*less* often, never more — it only prevents two genuinely different requests from being
+mistaken for the same work, at the cost (unmeasured, believed small — normal PR/push
+traffic doesn't fire two different-shaped requests at the same workspace within the
+coalescing window) of occasionally doing the same extraction twice when it could
+theoretically have been shared. Trading a small amount of possibly-redundant work for
+never returning the wrong caller's answer to another caller was judged the only
+defensible direction, since the wire contract's purity guarantee (§8: same inputs, same
+output) already implies the *other* direction is a correctness bug, not a performance
+one.
+
+**Not updated in ARCHITECTURE.md's own wording until this pre-merge review** — §8's
+Contract properties bullet still reads "single-flight per `workspacePath`" verbatim,
+which undersells what the implementation actually guards against. Recorded here as the
+accurate description; ARCHITECTURE.md's bullet should be read as shorthand for it, not a
+literal spec the code narrows away from.

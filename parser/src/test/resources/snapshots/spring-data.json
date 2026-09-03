@@ -1,0 +1,157 @@
+{
+  "requestId" : "snapshot",
+  "sha" : "0000000000000000000000000000000000000000",
+  "mode" : "full",
+  "sourceRoots" : [ "src/main/java" ],
+  "functions" : [ {
+    "key" : "fn:com.acme.model.Widget#getName()",
+    "fqcn" : "com.acme.model.Widget",
+    "className" : "Widget",
+    "methodName" : "getName",
+    "paramTypes" : [ ],
+    "paramNames" : [ ],
+    "returnType" : "java.lang.String",
+    "filePath" : "src/main/java/com/acme/model/Widget.java",
+    "startLine" : 6,
+    "endLine" : 6,
+    "bodyHash" : "sha256:83ed458b82b216de8c578344cd9d0418805e62d7ee6836cde9d4feb26022e824",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.repository.WidgetRepository#findByName(java.lang.String)",
+    "fqcn" : "com.acme.repository.WidgetRepository",
+    "className" : "WidgetRepository",
+    "methodName" : "findByName",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "name" ],
+    "returnType" : "java.util.Collection",
+    "filePath" : "src/main/java/com/acme/repository/WidgetRepository.java",
+    "startLine" : 5,
+    "endLine" : 5,
+    "bodyHash" : "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "modifiers" : [ ],
+    "annotations" : [ ],
+    "isAbstract" : true,
+    "isInterfaceMethod" : true,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.service.WidgetService#<init>(com.acme.repository.WidgetRepository)",
+    "fqcn" : "com.acme.service.WidgetService",
+    "className" : "WidgetService",
+    "methodName" : "<init>",
+    "paramTypes" : [ "com.acme.repository.WidgetRepository" ],
+    "paramNames" : [ "widgetRepository" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/service/WidgetService.java",
+    "startLine" : 8,
+    "endLine" : 10,
+    "bodyHash" : "sha256:0fc0b19a03b3c7a0bdf40cb1b798eb0f10c692c7d064495ad9d24594fa27257d",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.service.WidgetService#find(java.lang.String)",
+    "fqcn" : "com.acme.service.WidgetService",
+    "className" : "WidgetService",
+    "methodName" : "find",
+    "paramTypes" : [ "java.lang.String" ],
+    "paramNames" : [ "name" ],
+    "returnType" : "java.util.Collection",
+    "filePath" : "src/main/java/com/acme/service/WidgetService.java",
+    "startLine" : 11,
+    "endLine" : 16,
+    "bodyHash" : "sha256:cbdb9da836cbf7cc6d3ed1e915f9028617d4b3507d544362c3d354ead6e348b8",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 0
+  }, {
+    "key" : "fn:com.acme.service.WidgetService#handle(com.thirdparty.Widget)",
+    "fqcn" : "com.acme.service.WidgetService",
+    "className" : "WidgetService",
+    "methodName" : "handle",
+    "paramTypes" : [ "com.thirdparty.Widget" ],
+    "paramNames" : [ "external" ],
+    "returnType" : "void",
+    "filePath" : "src/main/java/com/acme/service/WidgetService.java",
+    "startLine" : 19,
+    "endLine" : 19,
+    "bodyHash" : "sha256:bac6a76645c48064f198e711301492ace386110831d381f33ba68a3db6847bd4",
+    "modifiers" : [ "public" ],
+    "annotations" : [ ],
+    "isAbstract" : false,
+    "isInterfaceMethod" : false,
+    "unresolvedParamTypes" : 1
+  } ],
+  "surfaces" : [ {
+    "key" : "entity:com.acme.model.Widget",
+    "kind" : "entity",
+    "attrs" : {
+      "fqcn" : "com.acme.model.Widget"
+    }
+  }, {
+    "key" : "table:widgets",
+    "kind" : "table",
+    "attrs" : {
+      "tableName" : "widgets"
+    }
+  } ],
+  "edges" : [ {
+    "from" : "entity:com.acme.model.Widget",
+    "to" : "table:widgets",
+    "type" : "maps_to",
+    "inferred" : true,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/repository/springdatajpa/SpringDataWidgetRepository.java",
+      "line" : 0
+    } ],
+    "reason" : null,
+    "candidates" : [ ]
+  }, {
+    "from" : "fn:com.acme.repository.WidgetRepository#findByName(java.lang.String)",
+    "to" : "entity:com.acme.model.Widget",
+    "type" : "queries",
+    "inferred" : true,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/repository/springdatajpa/SpringDataWidgetRepository.java",
+      "line" : 5
+    } ],
+    "reason" : null,
+    "candidates" : [ ]
+  }, {
+    "from" : "fn:com.acme.service.WidgetService#find(java.lang.String)",
+    "to" : "fn:com.acme.repository.WidgetRepository#findByName(java.lang.String)",
+    "type" : "calls",
+    "inferred" : false,
+    "confidence" : "exact",
+    "callSites" : [ {
+      "filePath" : "src/main/java/com/acme/service/WidgetService.java",
+      "line" : 15
+    } ],
+    "reason" : null,
+    "candidates" : [ ]
+  } ],
+  "diagnostics" : {
+    "durationMs" : -1,
+    "filesParsed" : 4,
+    "parseErrors" : [ ],
+    "totalEdges" : 3,
+    "unresolvedEdges" : 0,
+    "unresolvedRate" : 0.0,
+    "nonExternalUnresolvedRate" : 0.0,
+    "externalCalls" : 1,
+    "unresolvedParamTypes" : 1,
+    "ambiguousOverloads" : [ ],
+    "failedDeclarations" : 0,
+    "guardedFailures" : 0,
+    "targetsMissingFromIndex" : 0
+  }
+}

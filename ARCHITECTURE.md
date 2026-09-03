@@ -223,31 +223,127 @@ resolution").
 **Route → controller method.** Concatenate the class-level `@RequestMapping`
 path with the method-level `@GetMapping` / `@PostMapping` / `@PutMapping` /
 `@DeleteMapping` / `@PatchMapping` / `@RequestMapping(method=…)`. Normalise path
-variables to `{name}`. Emit an `http_route` surface plus a `handles` edge.
-Unresolved `${property}` placeholders are kept verbatim and flagged
-`confidence: "ambiguous"`.
+variables to `{name}`, and normalise slashes so `/api/` + `list` and `/api` +
+`/list` produce one key rather than two surfaces for one endpoint. Emit an
+`http_route` surface plus a `handles` edge (`inferred: true` — Spring wires the
+route; it is not a written call).
 
-**Spring Data derived queries.** For an interface extending `JpaRepository<T,ID>`,
-`CrudRepository`, or `PagingAndSortingRepository`, take the entity from the type
-argument `T`. Map entity → table from `@Table(name=…)`, else `@Entity(name=…)`,
-else Spring Boot's default `CamelCaseToUnderscoresNamingStrategy`
-(`UserAccount` → `user_account`). Parse derived method names on the
+**Inherited mappings.** A controller method with no method-level mapping of its
+own inherits the mapping from the corresponding method on any implemented or
+overridden interface — **in-repo or solver-only**, including OpenAPI-generated
+API interfaces under `target/generated-sources`. The inherited path is
+concatenated with *this controller's* class-level mapping, and the surface and
+`handles` edge attach to the **in-repo controller method**; no node is created
+for the generated interface. Confidence stays `exact`: the annotation was read
+from a real declaration, not guessed.
+
+Without this the rule is close to useless on a common Spring shape. Measured on
+`spring-petclinic-rest`, whose controllers carry only `@RequestMapping("/api")`
+and put every method-level mapping on the generated interface: **1 route before,
+37 after — exactly the 37 endpoints its OpenAPI spec declares.**
+
+A mapping on an **interface** method is a declaration to be inherited, not a
+route in itself — Spring serves a route only through a concrete request-handling
+bean — so no surface is emitted for it. Otherwise one endpoint appears twice:
+unprefixed on the interface and prefixed on the controller.
+
+**Constant paths.** Generated code writes `value = OwnersApi.PATH_DELETE_OWNER`
+rather than a literal. A `static final String` is statically knowable, so the
+constant is resolved to its initialiser on the declaring type. This is *not* the
+same as a `${property}` placeholder, which is runtime configuration: those are
+kept verbatim and flagged `confidence: "ambiguous"`.
+
+**Spring Data derived queries.** An interface is a Spring Data repository if it
+extends any member of the family rooted at
+`org.springframework.data.repository.Repository<T,ID>` — `CrudRepository`,
+`PagingAndSortingRepository` and `JpaRepository` all extend it. Take the entity
+from whichever marker appears as its type argument `T`.
+
+Match the **family root, not the popular subclass**: `spring-petclinic-rest` uses
+none of the three named subinterfaces, and matching only those finds nothing
+there. Detection is gated on the supertype's **import** resolving to
+`org.springframework.data.repository.*` — never on the bare name `Repository`,
+which is far too common to match safely.
+
+**Split-interface shape.** The marker frequently sits on a sub-interface that
+extends an in-repo domain interface declaring the actual methods:
+
+```java
+public interface SpringDataOwnerRepository
+        extends OwnerRepository, Repository<Owner, Integer> { … }
+```
+
+`T` therefore binds to the methods reachable through the marker interface's
+in-repo super-interface chain, and `queries` edges are emitted at those method
+**declarations**, not at call sites. That composes with the ordinary `calls`
+edges instead of duplicating them:
+
+```
+entity:Owner ← queries ← OwnerRepository#findByLastName ← calls ← ClinicServiceImpl…
+```
+
+Map entity → table from `@Table(name=…)`, else `@Entity(name=…)`, else Spring
+Boot's default `CamelCaseToUnderscoresNamingStrategy` (`UserAccount` →
+`user_account`). Parse derived method names on the
 `findBy|readBy|getBy|queryBy|countBy|existsBy|deleteBy` prefix and emit
 `queries` (fn → entity) plus `maps_to` (entity → table). `@Query` methods:
 extract referenced names by regex from the JPQL/native string and mark
 `confidence: "regex"`.
 
+Access is taken from the method's verb: `save`/`delete`/`persist` are writes;
+`find`/`get`/`read`/`exists`/`count`/`stream` are reads.
+
+*Not yet covered:* inherited CRUD invoked on a reference whose declared type is
+the Spring Data interface itself (`userRepo.save(u)` where
+`interface UserRepo extends JpaRepository<User,Long>`). That shape appears in
+neither validation repo, so it is deferred rather than shipped fixture-only —
+see §17. It degrades to `external_type`, leaving the alerting metric at zero.
+
 **Entry points.** `@Scheduled` → `scheduled_job` surface. `@KafkaListener`,
 `@RabbitListener`, `@JmsListener`, `@EventListener` → `message_listener`
 surface. Both connect via `triggers`.
 
-### 6.5 Unresolved edges
+### 6.5 Unresolved and external calls
 
-Any call site SymbolSolver cannot bind becomes an edge to an `unresolved:` node
-carrying the best available textual target and a `reason` (`external_type`,
-`ambiguous_overload`, `parse_error`, `missing_source`).
-`unresolvedRate = unresolvedEdges / totalEdges` is tracked per graph version and
-surfaced as a health metric — a spike means the analysis quietly got worse.
+Every call site has exactly one of three outcomes, decided by whether its
+resolved target is **in the extraction set** — the files this run turns into
+nodes. The three are never conflated.
+
+1. **Target is in the extraction set** → a `calls` edge. This is the impact
+   surface.
+2. **Target resolves but is outside the extraction set** → no edge; counted in
+   `diagnostics.externalCalls`. Two things land here: the JDK and third-party
+   jars, and **solver-only roots** — generated sources that are fed to the type
+   solver so hand-written code can resolve them, but which are never extracted
+   (see §8, source roots). Nothing here can carry impact: you cannot change
+   `java.util.HashMap`, and generated code changes only when its generator does.
+   Excluded by *scope*, not by failure.
+3. **Target cannot be bound at all** → an edge to an `unresolved:` node carrying
+   the best available textual target and a `reason` (`external_type`,
+   `ambiguous_overload`, `parse_error`, `missing_source`). Never dropped.
+
+Membership in (1) is decided by **source location**, not by whether the resolved
+declaration has an AST. Those differ: generated sources have an AST and still
+must not be graphed, or an edge would point at a node that was never emitted.
+
+Node keys follow the same split. An in-set target reuses the key `functions[]`
+already assigned it, looked up by source position rather than recomputed —
+recomputation is not safe, because the AST reachable from a resolved declaration
+comes from the type solver's own parse, which carries no symbol resolver and so
+names types differently. An unbindable target gets a textual `unresolved:` key.
+An out-of-set target gets no node at all.
+
+**Two rates, and only one of them alerts.**
+
+- `unresolvedRate = unresolvedEdges / totalEdges` is the headline figure, but it
+  is dominated by `external_type`, which under source+JDK resolution (D2) is
+  expected and benign. petclinic-rest measures 52.3%, essentially all of it
+  third-party Spring. Read it as the **D2 upgrade trigger**: when it grows
+  large enough to degrade explanations, classpath resolution is the fix.
+- `nonExternalUnresolvedRate` — everything except `external_type` — is the
+  **health signal**. It is 0.0% in both validation repos today. A rise means
+  genuine blindness: an in-repo call we failed to bind, an overload we could not
+  disambiguate, a file that would not parse. This is the one that alerts.
 
 ### 6.6 Known limitation: overload resolution
 
@@ -289,7 +385,11 @@ Index: `{ provider: 1, githubRepoId: 1 }` unique.
 { _id, repoId, sha, kind: "branch" | "pr_overlay",
   status: "building" | "ready" | "failed" | "superseded",
   parserVersion, ruleVersion,
-  stats: { functions, edges, surfaces, unresolvedRate, parseErrors },
+  stats: { functions, edges, surfaces,
+           unresolvedRate,              // all unresolved edges / total edges
+           nonExternalUnresolvedRate,   // excludes external_type — the alerting metric (§6.5)
+           externalCalls,               // resolved but outside the extraction set; not graphed
+           parseErrors },
   pinnedBy: [analysisId], startedAt, completedAt, error }
 ```
 `parserVersion` + `ruleVersion` are stored so a parser upgrade can invalidate
@@ -406,12 +506,20 @@ Request:
   "workspacePath": "/data/work/<repoId>/<sha>",
   "mode": "full",
   "files": ["src/main/java/com/acme/user/UserService.java"],
-  "options": { "includeTestSources": false, "sourceRoots": null }
+  "options": { "includeTestSources": false }
 }
 ```
 `files` is required when `mode` is `"subset"` and ignored when `"full"`.
-When `sourceRoots` is null the service discovers every `**/src/main/java`
-directory and registers a `JavaParserTypeSolver` for each (see **Q3**).
+`options` is always auto-discovery: the service finds every `**/src/main/java`
+(and `**/src/test/java` when `includeTestSources`) directory itself and
+registers a `JavaParserTypeSolver` for each (see **Q3**, `SourceRootDiscovery`).
+An earlier draft of this doc also showed a request-side `sourceRoots` override
+in `options` (letting a caller name source roots explicitly instead of relying
+on discovery); `ParseRequest.ParseOptions` never grew that field, and M2 shipped
+without it — discovery-only, no override path, disclosed here rather than left
+for the example to imply otherwise. The response's own `sourceRoots` field
+below is unaffected — that one *is* implemented, reporting what discovery
+found, not accepting an override.
 
 Response `200`:
 ```json
@@ -463,21 +571,46 @@ Response `200`:
     "totalEdges": 1840,
     "unresolvedEdges": 96,
     "unresolvedRate": 0.052,
-    "ambiguousOverloads": ["…"]
+    "nonExternalUnresolvedRate": 0.0,
+    "externalCalls": 512,
+    "unresolvedParamTypes": 3,
+    "ambiguousOverloads": ["…"],
+    "failedDeclarations": 0,
+    "guardedFailures": 0,
+    "targetsMissingFromIndex": 0
   }
 }
 ```
+`nonExternalUnresolvedRate` is the health signal that alerts (§6.5); `unresolvedRate` is
+diagnostic-only, dominated by expected `external_type` under D2's source+JDK resolution.
+`failedDeclarations`, `guardedFailures` and `targetsMissingFromIndex` should be zero on a
+healthy run — each counts a distinct swallowed-failure path in extraction (isolated
+per-declaration/per-call-site resilience, not a whole-file loss) so a defect there is
+visible on the wire rather than silently folded into "no edges emitted" (see
+`ExtractionResult`'s and `ParseDiagnostics`'s Javadoc for what each counts).
+
+Jackson serializes every declared field of every record on this response, `null` and all
+— there is no TypeScript-style "key omitted when absent" convention on the wire. A field
+typed optional in the TypeScript mirror (`reason`, `candidates` on an edge that isn't
+`unresolved`) still appears as a literal JSON `null`, never a missing key.
 
 Errors: `400` malformed request · `404` `workspacePath` does not exist ·
-`422` no Java source roots found · `500` internal failure, body still carrying
-`diagnostics` so a partial failure is diagnosable.
+`422` no Java source roots found · `413` extraction list exceeds the
+provisional scale ceiling (§16.1 Q9) — distinct from 422, since the client
+needs to tell "wrong path" from "right path, too big for v1" apart · `500`
+internal failure, body still carrying `diagnostics` so a partial failure is
+diagnosable.
 
 Contract properties:
 
 - **Pure function of (workspace contents, mode, files, options).** Same inputs, same output — which is what makes graph versions reproducible.
 - **Synchronous.** The caller is already an async worker; a callback would add a state machine for nothing. Client timeout 120s.
 - **Never partial-silently.** Files that fail to parse appear in `diagnostics.parseErrors`; they do not vanish.
-- **Concurrency:** CPU-bound; in-flight parses capped at `cores - 1`, single-flight per `workspacePath`.
+- **Concurrency:** CPU-bound; in-flight parses capped at `cores - 1`, single-flight per
+  `(workspacePath, mode, extraction files, includeTestSources)` — wider than
+  `workspacePath` alone, so two differently-shaped requests against the same workspace
+  (e.g. a `full` parse racing a `subset` one) never coalesce onto one shared result. See
+  DECISIONS.md, "Coalescing key: widened past §8's literal wording".
 
 ### `GET /v1/version`
 ```json
@@ -643,7 +776,7 @@ the rubric change together.
 
 - **Zone 1, `directCallers`:** reverse over `calls` / `implements` / `overrides`, 1–2 hops, full detail. Ranked with signature-incompatible callers first, then by hop count, then by `edgeConfidence` (`exact` above `ambiguous`). Capped at N (start at 15), with `directCallerTotal` always reporting the true number — the count is a fact from the graph, never an LLM estimate.
 - **Zone 2, `reachableSurfaces.entrypoints`:** continue the reverse walk to a safety cap of depth 5, **discarding intermediate functions** and keeping only terminal surfaces, deduped and flattened. This is why a change to a util method yields a short list instead of three hundred nodes.
-- **`reachableSurfaces.data`:** collected in the *forward* direction (a table is downstream of the method, not upstream) from the changed method and its immediate callees, following `queries` and `maps_to`. It sits under `reachableSurfaces` because "which tables does this touch" is what a reviewer wants, but it is a different relationship from `entrypoints` — see open question **Q4**.
+- **`reachableSurfaces.data`:** collected in the *forward* direction (a table is downstream of the method, not upstream) by walking `calls` forward **to the same depth cap as the reverse entrypoints zone**, then following `queries` and `maps_to`, and collapsing to terminal data surfaces only — a deliberate mirror of Zone 2. Carries `minHops` and `viaInferredEdge` for the same reason entrypoints do. One hop is not enough: §6.4's split-interface shape puts the entity two hops from a controller (`controller → service → repository → entity`), the canonical layered Spring shape, so a depth-1 walk would report no data surfaces for exactly the changes reviewers care about most (resolves Q11). It sits under `reachableSurfaces` because "which tables does this touch" is what a reviewer wants, but it is a different relationship from `entrypoints` — see open question **Q4**.
 - **`nowDependsOn`:** forward, exactly one hop. `isNew` is computed by diffing the head overlay's outgoing edges against the base graph's. Kept structurally separate from `affectedBy` so the LLM cannot conflate "affected by" with "depends on".
 - **`viaInferredEdge`** is set when any edge on the shortest path was Spring-inferred rather than literally written. The UI and the explanation both need to say "…via the single `@Service` implementation" rather than assert the connection flatly.
 - **Rejected:** unbounded reverse traversal keeping all nodes (util changes fan out to hundreds), and symmetric full both-directions traversal (doubles tokens and blurs the two relationships).
@@ -800,8 +933,11 @@ before the graph does.**
 
 ## 14. Metrics
 
-*Graph quality:* `unresolvedRate`, ambiguous-edge rate, parse errors per index,
-node and edge counts per version.
+*Graph quality:* **`nonExternalUnresolvedRate`** (the alerting metric — see §6.5),
+`unresolvedRate` and `externalCalls` (diagnostic, not alerting: they measure how
+much of the program is outside the extraction set, which is the D2 upgrade
+trigger), ambiguous-edge rate, parse errors per index, node and edge counts per
+version.
 
 *Pipeline:* webhook ack latency p50/p99 (against the 10s budget), queue depth and
 wait time, parse duration, end-to-end push→ready and PR→ready latency.
@@ -812,8 +948,13 @@ actually governs cost here; a low hit rate, not a caching flag, is what to watch
 and tokens per analysis from Gemini's `usageMetadata`
 (`promptTokenCount` / `candidatesTokenCount`).
 
-`unresolvedRate` and the validator rejection rate are the two that indicate the
-product is quietly getting worse. They should alert.
+`nonExternalUnresolvedRate` and the validator rejection rate are the two that
+indicate the product is quietly getting worse. They should alert.
+
+`unresolvedRate` deliberately does **not** alert. It is dominated by
+`external_type`, which is expected under source+JDK resolution — petclinic-rest
+sits above 50% while its non-external rate is 0.0%. Alerting on it would train
+everyone to ignore the alert.
 
 ---
 
@@ -878,12 +1019,28 @@ object small and the boundary clean.
 `analyses` and `explanations` — keep indefinitely (they are small, and they make
 the eval corpus), or TTL them?
 
-**Q9 — Scale ceiling.** Sizing assumes 50–300 files and a seconds-long full parse.
-What is the hard cap at which indexing should fail loudly, rather than silently
-taking minutes and blowing the PR→ready latency budget?
+**Q9 — Scale ceiling.** *(Resolved in M2 phase 9 — see §16.1.)* Sizing assumes
+50–300 files and a seconds-long full parse. What is the hard cap at which
+indexing should fail loudly, rather than silently taking minutes and blowing
+the PR→ready latency budget?
 
 **Q10 — Frontend graph size.** *Assumption:* the force-directed view caps at ~150
 nodes, collapsing beyond that. Confirm the cap and the collapse behaviour.
+
+**Q11 — Forward data-surface depth (found in M2 phase 5).** §10 collects
+`reachableSurfaces.data` "from the changed method **and its immediate callees**"
+— one `calls` hop, then `queries`/`maps_to`. With §6.4's split-interface shape
+the chain is `caller → calls → RepositoryInterface#method → queries → entity`,
+so composition works only when the changed method calls the repository
+*directly*. In a layered Spring app — controller → service → repository, which
+is petclinic's shape and the canonical one — a controller-level change is two
+`calls` hops from the repository and would report **no data surfaces at all**.
+That is the common case, not an edge case. *Proposed:* walk `calls` forward to a
+depth cap and collapse to terminal data surfaces, mirroring how
+`reachableSurfaces.entrypoints` already handles the reverse direction.
+**Resolved:** approved as proposed; §10 updated. `nowDependsOn.callees` stays at
+one hop — a different question (what this change now depends on, not what data
+it reaches).
 
 ### 16.1 Answers (BUILD_PLAN Step 0)
 
@@ -915,15 +1072,34 @@ Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone
 - **Q8 (retention):** **keep** `analyses` and `explanations` indefinitely — both
   are small, and together they are the eval corpus (§DECISIONS "An eval is the
   differentiator").
-- **Q9 (scale ceiling):** deferred to M2 — pick the hard file/edge cap once real
-  parse timings exist against both target repos, rather than guess a number now.
+- **Q9 (scale ceiling):** **resolved, provisionally, in M2 phase 9.** A hard cap
+  of **500 files** on the extraction list (`files.size()`, so subset-mode
+  requests against a huge repo are unaffected — only what would actually be
+  parsed is gated), enforced by `POST /v1/parse` before any CPU is spent, via
+  `parser.scale.max-files` (default 500). Basis: observability-final (71
+  files, ~1.1s) and spring-petclinic-rest (87 files, ~1.3s) cluster too
+  closely to reveal the curve's shape — they pin the intercept, not the
+  slope. A third point, macrozheng/mall @ `0504e86` (519 files, 7 modules, 24.3s
+  wall-clock), is the one that matters: files grew ~6x over petclinic while
+  time grew ~18x — superlinear, consistent with `SymbolSolver`'s known
+  behaviour on cross-file resolution. With one large-repo sample, an
+  extrapolated fit would be false confidence, so 500 is set *at, not above*,
+  the one point actually measured safe against a **~30s parse-latency
+  budget** — framed against tolerable PR/push→ready latency, not GitHub's
+  ~10s webhook ack, which BullMQ already decouples (C6). Full reasoning:
+  DECISIONS "Provisional scale ceiling". Raise it once §17's classpath
+  resolution or incremental indexing lands, or once more large-repo data
+  narrows the curve.
 - **Q10 (frontend graph cap):** ~150 nodes, collapse beyond that. Confirmed;
-  revisit visually in M7.---
+  revisit visually in M7.
+
+---
 
 ## 17. Roadmap (documented, not built)
 
 - **Classpath type resolution** — `mvn dependency:build-classpath` / the Gradle equivalent, a `JarTypeSolver` per jar, cached per `pom.xml` / `build.gradle` hash. Sits behind the TypeSolver interface from D2, so it lands without touching the graph model or node keys. Fixes the overload limitation (§6.6). *Trigger:* `unresolvedRate` persistently high enough to degrade explanations.
-- **Incremental indexing** — dirty-set expansion (re-parse changed files plus files whose resolution depends on them), with a periodic full rebuild as a correctness backstop. *Trigger:* full re-index time exceeding an acceptable webhook-to-ready latency.
+- **Incremental indexing** — dirty-set expansion (re-parse changed files plus files whose resolution depends on them), with a periodic full rebuild as a correctness backstop. *Trigger:* full re-index time exceeding an acceptable webhook-to-ready latency — concretely, a real repo hitting the 500-file provisional ceiling (§16.1 Q9).
+- **Inherited CRUD through a Spring-Data-typed reference** — `queries` edges for `save` / `findById` / `findAll` / `delete` / `count` called on a reference whose declared type is the Spring Data interface itself, rather than an in-repo domain interface. Deferred because the shape exists in neither validation repo, so building it now would ship a rule covered only by author-written fixtures — the thing the no-toy-examples convention exists to prevent. Degrades to `external_type`, so the alerting metric stays honest. *Trigger:* a validation repo that calls inherited CRUD on a reference typed as the Spring Data interface.
 - **Claim-level citations** (§11.4).
 - **Rename-crossing change history** (§12).
 - **Test-coverage edges** (Q2).

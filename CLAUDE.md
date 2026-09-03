@@ -53,6 +53,15 @@ docker-compose.yml   Mongo + Redis for local dev
   a bug there is silent.
 - One milestone per branch/PR (see BUILD_PLAN.md). Prefer plan mode for each milestone.
 - Build fixtures from the two real Spring repos, not toy examples.
+- **Verify builds by EXIT CODE, never by grepping output for "ERROR".** A grep that
+  finds nothing is not a passing build. `mvn ... ; echo $?` — 0 or it did not pass.
+  (Learned the hard way in M2 phase 4: a false green sent work down a dead end.)
+- **Measure only after a green build.** Re-running a measurement against a failed
+  build measures stale classes. Fix → build green → measure once, not fix → measure
+  → fix.
+- **Never let a broad `catch` hide a defect.** `catch (RuntimeException ignored)` around
+  extraction turned a real bug into "no edges emitted" with no signal. If a catch is
+  load-bearing for resilience, count what it swallows and surface the count.
 
 ## Commands
 ```bash
@@ -71,4 +80,45 @@ Copy `.env.example` → `.env` before running anything that needs credentials.
 but `typescript-eslint@8` requires `typescript <6.1.0`. Bump both together when
 typescript-eslint supports TS 7.
 
-_Parser (`mvn`) commands land with M2; frontend commands with M7._
+Parser service (`/parser`, Java 21 + Maven):
+```bash
+cd parser && mvn test                    # unit + regression tests
+cd parser && mvn package -DskipTests     # builds target/parser-0.1.0.jar
+cd parser && mvn spring-boot:run         # serves on :8080
+```
+HTTP API (M2 phase 7): `POST /v1/parse`, `GET /v1/version`, `GET /healthz`, `GET /readyz`.
+**Kill the server before `mvn clean`** — Windows keeps the running jar's file handle
+open and `clean` will fail with "process cannot access the file". Find the real PID
+with `netstat -ano | grep ':8080'` (Git Bash's own `$!` PID is not the Windows PID
+for a backgrounded `java -jar`), then `taskkill //F //PID <pid>`.
+
+Parser CLI — point it at a repo and dump the §8 JSON (M2 phase 6). Any CLI flag
+selects one-shot mode; with none, the jar starts the web service:
+```bash
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --summary          # digest for eyeballing
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --out graph.json   # full JSON
+java -jar parser/target/parser-0.1.0.jar --dir <repo> --files a.java,b.java   # subset mode (D4)
+```
+Exit codes: 0 ok, 2 usage error or no Java source roots (§8's 422 case).
+
+Parser golden-master snapshots (M2 phase 8) live in `parser/src/test/resources/snapshots/`
+and cover the **whole** `ParseResponse`, diagnostics included — not just
+functions/surfaces/edges. Updating one is a reviewed two-step action, never a silent
+overwrite: the update run always fails on purpose so the diff gets read before the next
+plain run is allowed to go green.
+```bash
+cd parser && mvn test -Dtest=ParserSnapshotTest -Dsnapshot.update=true   # regenerates, fails on purpose
+git diff parser/src/test/resources/snapshots/                           # review before trusting it
+cd parser && mvn test -Dtest=ParserSnapshotTest                         # must now pass
+```
+
+Validating the parser against the two real repos (DECISIONS, "Validation & eval repos").
+These tests **skip** when the properties are unset, so a plain `mvn test` stays green
+without the checkouts:
+```bash
+cd parser && mvn test -Dtest=RealRepoExtractionTest -Dvalidation.observability="C:/Users/anime/OneDrive/Desktop/oberservability-final/Dummy" -Dvalidation.petclinic="C:/Users/anime/OneDrive/Desktop/mern-llm-proj/_validation/spring-petclinic-rest"
+```
+Note the folder on disk is spelled `oberservability-final`; the docs call the repo
+`observability-final`.
+
+_Frontend commands land with M7._
