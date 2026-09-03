@@ -256,7 +256,14 @@ public final class EntryPointRules {
                                                         members.getOrDefault(
                                                                 "destination",
                                                                 members.getOrDefault("value", ""))));
-                                String cleanedTopic = topic.replaceAll("[{}\"]", "").trim();
+                                // topics/queues/destination can legally be array-shaped
+                                // (@KafkaListener(topics = {"a", "b"})); unwrap through the
+                                // same first-element rule routes already use for @RequestMapping
+                                // arrays, rather than regex-stripping the raw array text, which
+                                // used to silently concatenate every element into one
+                                // comma-joined, meaningless key.
+                                String cleanedTopic =
+                                        SpringAnnotations.firstElement(topic).replaceAll("[{}\"]", "").trim();
                                 String key =
                                         "listener:"
                                                 + entry.getValue()

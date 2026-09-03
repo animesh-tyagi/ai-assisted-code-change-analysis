@@ -428,6 +428,20 @@ unrecorded until a pre-merge review noticed it was missing from both tables abov
 declares a real `@KafkaListener`/`@RabbitListener`/`@JmsListener` method. At that point re-measure
 and move `message_listener` into the validated table alongside `scheduled_job`.
 
+**Fixed during this same review, not just disclosed:** triaging `message_listener` specifically
+(prompted by a separate reuse finding about duplicated annotation-member reading) surfaced a real
+bug in it — `topics`/`queues`/`destination` can legally be array-valued
+(`@KafkaListener(topics = {"a", "b"})`), and the rule read the member's raw source text straight
+into a `{}"`-stripping regex, which for two or more elements silently concatenated them into one
+comma-joined, semantically meaningless key (`listener:kafka:a, b`) instead of picking one — unlike
+`@RequestMapping` arrays, which already took-first via `SpringAnnotations.firstValue`. Verified
+empirically (a throwaway probe test, since deleted) before fixing: confirmed the exact garbled
+output, confirmed `@RequestMapping`/`@GetMapping` arrays were unaffected (already correct via
+`firstValue`), then factored the unwrap into `SpringAnnotations.firstElement` so both call sites
+share one implementation instead of the topic-extraction growing its own — the same
+divergence-hazard `keyOfIndexed` was introduced to close elsewhere. Regression test added and
+mutation-verified (fails without the fix, passes with it).
+
 
 ---
 

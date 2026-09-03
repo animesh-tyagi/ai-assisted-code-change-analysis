@@ -320,6 +320,39 @@ class EntryPointRulesTest {
         }
 
         @Test
+        void anArrayValuedTopicsMemberTakesTheFirstRatherThanConcatenatingAll() throws IOException {
+            // A pre-merge review triage: members()/literalOf() render an
+            // array-valued member as its raw source text ({"a", "b"}), and this
+            // rule used to regex-strip {}" straight off that text — for two or
+            // more topics that produced one comma-joined, meaningless key
+            // ("orders.created, orders.updated") instead of picking one, unlike
+            // @RequestMapping arrays which already took-first via firstValue().
+            writeSource(
+                    "src/main/java/com/acme/L.java",
+                    """
+                    package com.acme;
+                    class L {
+                        @KafkaListener(topics = {"orders.created", "orders.updated"})
+                        void onOrder(String payload) {}
+                    }
+                    """);
+
+            ExtractionResult result = extract();
+
+            assertThat(surface(result, "listener:kafka:orders.created"))
+                    .isPresent()
+                    .get()
+                    .satisfies(
+                            s -> {
+                                assertThat(s.kind()).isEqualTo(SurfaceKind.MESSAGE_LISTENER);
+                                assertThat(s.attrs()).containsEntry("topic", "orders.created");
+                            });
+            assertThat(result.surfaces())
+                    .as("only one listener surface — v1 takes the first topic, does not fan out")
+                    .hasSize(1);
+        }
+
+        @Test
         void aMethodWithNoEntryPointAnnotationProducesNoSurface() throws IOException {
             writeSource(
                     "src/main/java/com/acme/Plain.java",

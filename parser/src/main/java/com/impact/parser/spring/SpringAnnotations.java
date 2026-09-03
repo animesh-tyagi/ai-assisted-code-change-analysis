@@ -104,12 +104,29 @@ public final class SpringAnnotations {
         if (value == null || value.isBlank()) {
             return Optional.empty();
         }
-        if (value.startsWith("{")) {
-            String inner = value.substring(1, value.endsWith("}") ? value.length() - 1 : value.length());
+        return Optional.of(firstElement(value));
+    }
+
+    /**
+     * Unwraps a member's raw text to a single value: {@code {"a", "b"}} → {@code a};
+     * a bare {@code "a"} passes through unchanged. The same "take first, don't fan
+     * out" rule {@link #firstValue} applies to {@code value}/{@code path}, factored
+     * out so any other array-shaped member (e.g. {@code @KafkaListener(topics =
+     * {...})}) reads through the identical unwrap instead of growing its own —
+     * confirmed by a pre-merge review that {@code EntryPointRules.messageListener}
+     * had exactly that: reading an array member's raw {@code toString()} text
+     * straight into a regex strip of {@code {}"} characters, which for two or more
+     * topics silently concatenated them into one comma-joined, semantically
+     * meaningless key/attr instead of taking the first the way routes already do.
+     */
+    public static String firstElement(String rawValue) {
+        if (rawValue.startsWith("{")) {
+            String inner =
+                    rawValue.substring(1, rawValue.endsWith("}") ? rawValue.length() - 1 : rawValue.length());
             String first = inner.split(",")[0].trim();
-            return Optional.of(unquote(first));
+            return unquote(first);
         }
-        return Optional.of(value);
+        return rawValue;
     }
 
     /**
