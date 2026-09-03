@@ -431,14 +431,23 @@ them is informative about the *shape* of the cost curve:
 |---|---|---|
 | observability-final | 71 | ~1.1s |
 | spring-petclinic-rest | 87 | ~1.3s |
-| macrozheng/mall (7 modules) | 519 | 24.3s |
+| macrozheng/mall @ `0504e86` (7 modules) | 519 | 24.3s |
+
+(`0504e86b1f1b6f1b8aa6a734d37a90fb67346be7`, cloned shallow for this measurement and
+deleted afterward — the clone was 29MB, not the ~500MB estimated at the time; it lived
+outside the repo entirely, at the sibling directory `_validation/`, so no gitignore
+entry was ever needed or possible.)
 
 The first two cluster within 20% of each other in file count — they pin the curve's
 *intercept* (parsing is fast at this size) but say nothing about its *slope*. mall is the
 point that matters: files grew ~6x over petclinic while wall-clock grew ~18x. That
 ratio — time outpacing file count — is consistent with `SymbolSolver`'s documented
 tendency toward superlinear cost as cross-file reference density rises, and is exactly the
-risk flagged before this measurement was taken.
+risk flagged before this measurement was taken. Read as a single power-law point relative
+to the small-repo baseline (~1.2s at ~79 files, the observability/petclinic average),
+`time ∝ files^n` gives `n ≈ ln(24.3/1.2) / ln(519/79) ≈ 1.6` — noted as a rough exponent
+for future reference, not as a trustworthy fitted curve; see the extrapolation warning
+immediately below.
 
 With a single large-repo sample, fitting a curve and extrapolating past it (e.g. "this
 implies ~590 files hits 30s, so set N there") would be false confidence dressed as

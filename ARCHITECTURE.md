@@ -1049,7 +1049,7 @@ Closed before implementation, so Claude Code doesn't stall on §16 mid-milestone
   `parser.scale.max-files` (default 500). Basis: observability-final (71
   files, ~1.1s) and spring-petclinic-rest (87 files, ~1.3s) cluster too
   closely to reveal the curve's shape — they pin the intercept, not the
-  slope. A third point, macrozheng/mall (519 files, 7 modules, 24.3s
+  slope. A third point, macrozheng/mall @ `0504e86` (519 files, 7 modules, 24.3s
   wall-clock), is the one that matters: files grew ~6x over petclinic while
   time grew ~18x — superlinear, consistent with `SymbolSolver`'s known
   behaviour on cross-file resolution. With one large-repo sample, an
