@@ -614,3 +614,74 @@ doc to swap the pointer on. Rather than invent a second schema for 'repos withou
 GitHub App', I widened the one field that actually needed it and synthesized a
 deterministic negative id — negative so it structurally can never collide with a real
 GitHub repo id once the webhook starts writing real ones into the same collection."
+
+
+---
+
+## Traversal heuristics and disclosed gaps (M4)
+
+**Context:** BUILD_PLAN Step 4 turns the stored graph into the `ContextObject` (§10) —
+a pure function over base-graph data, tested against fixtures, no git/LLM/live repo.
+Building it surfaced three places where the *documented* schema outruns what the
+pipeline actually has data for, plus one recurring convention worth recording once
+rather than re-justifying at each call site.
+
+### `throwsAdded` has no source; `signatureCompatible` degrades accordingly
+**Chose:** `signatureDiff.throwsAdded` is always `[]`. Neither the parser's wire
+contract (`ParsedFunctionWire`) nor `FunctionVersionDoc` capture a method's `throws`
+clause — M2 never extracted it, and re-opening a merged milestone to add one field is
+out of proportion for this step. `isSignatureCompatible` therefore checks only
+`returnTypeChanged`, not `throwsAdded.length > 0` (the check is still written against
+the real field, so it activates for free the moment the parser is extended).
+**Why not block on it:** the field is honest about what it reports — `[]` is exactly
+"no thrown-exception data available," not a fabricated "nothing changed." Silently
+inventing throws data would violate C1 far more than an admittedly-incomplete
+compatibility check does.
+**Roadmap trigger:** extend the parser's `ParsedFunction`/`ParsedFunctionWire` with a
+`throws: string[]` field (a small JavaParser addition — `MethodDeclaration.getThrownExceptions()`),
+thread it through `FunctionVersionDoc`, and `isSignatureCompatible` picks it up with no
+further change.
+
+### `DirectCaller.usage` states only what an edge proves, not invented dataflow
+**Chose:** `usage` is derived purely from the edge type reaching the caller —
+`"calls this method"` / `"implements this interface method"` / `"overrides this
+method"` — never a description of how the return value is used (assigned, dereferenced,
+discarded, …), because no dataflow analysis exists anywhere in this pipeline and none is
+planned. ARCHITECTURE §10's own example (`"return value assigned and dereferenced"`) is
+illustrative of the *shape* the field could one day hold, not a promise that data exists
+for it today.
+**Why:** C1 — "if the graph doesn't contain a fact, it must not appear" — applies to
+every field that crosses the LLM boundary, not just the ones the validator (§11.3)
+happens to check symbol-for-symbol. A specific-sounding but fabricated usage string
+would be exactly the kind of confident-but-untrue output the validator exists to catch
+elsewhere; better not to manufacture the problem here.
+**Roadmap trigger:** none currently planned — would need real dataflow analysis in the
+parser, a materially larger scope than this project's stated centerpiece (the Spring
+implicit-edge rules, DECISIONS "The Spring implicit edges are the actual contribution").
+
+### Return-type "widening" is not modelled; any difference is treated as incompatible
+**Chose:** `isSignatureCompatible` treats *any* return-type string difference as
+incompatible, rather than implementing Java's actual widening-conversion rules (e.g. a
+primitive `int` → `long` return would be source-compatible for most callers; a class
+type change to an unrelated type never is).
+**Why:** implementing real widening rules is disproportionate scope for a flag §10
+already documents as a heuristic, not a compiler verdict. The conservative direction —
+over-flag rather than silently clear a real break — matches this project's established
+bias elsewhere: interface-dispatch `ambiguous` edges emit to *all* candidates rather than
+guessing one (§6.4), and D2's unresolved calls are never dropped. A false "incompatible"
+costs a hedge in generated prose; a false "compatible" would hide a real break, which is
+the one failure category impact analysis cannot tolerate.
+**Roadmap trigger:** eval (M8) results showing the false-positive rate on primitive
+widening return-type changes actually hurts explanation quality in practice.
+
+### Weakest-link confidence/inferred for multi-hop paths
+**Chose:** §10 already specifies `viaInferredEdge` as "true if any edge on the shortest
+path was inferred." `worker/src/traversal/confidenceRank.ts` generalises this to
+`confidence` too, for every multi-hop path the traversal computes (Zone 1's 2-hop
+`directCallers`, Zone 2's depth-capped entrypoint and data-surface walks): a path's
+confidence is its *weakest* edge (`exact < single_impl < regex < ambiguous`), and
+`inferred` is `true` if any edge on the path is inferred.
+**Why:** a path is only as trustworthy as its least-trustworthy link — reporting the
+first or last edge's confidence instead would let one exact hop mask an ambiguous one
+elsewhere on the same path, understating uncertainty exactly where the explanation needs
+to hedge.

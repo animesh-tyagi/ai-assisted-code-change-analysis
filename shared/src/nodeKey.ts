@@ -164,7 +164,7 @@ export function displayNameOf(key: NodeKey): string {
 }
 
 /** `java.lang.Long` → `Long`; `java.lang.String[]` → `String[]`. */
-function simpleTypeName(type: string): string {
+export function simpleTypeName(type: string): string {
   const arraySuffixAt = type.indexOf('[');
   const base = arraySuffixAt === -1 ? type : type.slice(0, arraySuffixAt);
   const suffix = arraySuffixAt === -1 ? '' : type.slice(arraySuffixAt);
