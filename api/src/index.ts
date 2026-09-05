@@ -1,26 +1,30 @@
 /**
  * `@impact/api` — the Express app: webhook receiver and read endpoints.
  *
- * M1 scaffold. Only `GET /healthz` exists so far; it is enough to prove the
- * workspace wiring resolves and to give `npm run dev:api` something to answer.
+ * `POST /api/webhooks/github` — raw-body signature verify, delivery dedupe,
+ * event switch, enqueue, 202 (ARCHITECTURE §9.1). **M6 Phase 2.**
  *
- * Still to come:
- *   - `POST /api/webhooks/github` — raw-body signature verify, delivery dedupe,
- *     202 in under ~500ms (ARCHITECTURE §9.1). **M6.**
- *   - `GET /api/analyses/:id` and the polling endpoints (§9.6). **M6.**
- *
- * Note for M6: the webhook route needs the *raw* request body to verify
- * `X-Hub-Signature-256`, so `express.json()` must be mounted with a `verify`
- * callback that stashes the buffer — not applied globally before that route.
+ * Still to come: `GET /api/analyses/:id` and the polling endpoints (§9.6). **M6 Phase 5.**
  */
 
 import express from 'express';
+import type { Db } from 'mongodb';
+import { pathToFileURL } from 'node:url';
 
 import { CONTEXT_SCHEMA_VERSION } from '@impact/shared';
 
 import { loadConfig } from './config.js';
+import { connect } from './db/client.js';
+import { createQueues, type Queues } from './queues/producer.js';
+import { createWebhooksRouter } from './routes/webhooks.js';
 
-export function createApp(): express.Express {
+export interface AppDeps {
+  db: Db;
+  queues: Queues;
+  webhookSecret: string;
+}
+
+export function createApp(deps: AppDeps): express.Express {
   const app = express();
 
   app.get('/healthz', (_req, res) => {
@@ -31,14 +35,40 @@ export function createApp(): express.Express {
     });
   });
 
+  app.use(
+    '/api/webhooks',
+    createWebhooksRouter({
+      db: deps.db,
+      queues: deps.queues,
+      webhookSecret: deps.webhookSecret,
+    }),
+  );
+
   return app;
 }
 
-// Only listen when run directly, so tests can import `createApp` without
-// binding a port.
-if (process.argv[1] !== undefined && import.meta.url.endsWith('index.ts')) {
+// Only run when started directly, so tests can import `createApp` and supply
+// their own (fake) deps without connecting to real Mongo/Redis or binding a port.
+//
+// `.endsWith('index.ts')` (the check used by worker/src/index.ts and
+// worker/src/llm/cli.ts) is not enough here: this module is also *imported*
+// by webhooks.test.ts, and an imported module's own `import.meta.url` still
+// ends with its filename regardless of who loaded it. Comparing against
+// `process.argv[1]` (the actual entry script) is what distinguishes "this
+// file is running as the program" from "this file was merely imported".
+const isMainModule =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMainModule) {
   const config = loadConfig();
-  createApp().listen(config.port, () => {
-    console.log(`[api] listening on http://localhost:${String(config.port)}`);
-  });
+  const db = await connect(config.mongoUrl, config.mongoDb);
+  const queues = createQueues(config.redisUrl);
+
+  createApp({ db, queues, webhookSecret: config.githubWebhookSecret }).listen(
+    config.port,
+    () => {
+      console.log(`[api] listening on http://localhost:${String(config.port)}`);
+    },
+  );
 }
