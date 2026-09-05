@@ -18,7 +18,7 @@ import express from 'express';
 
 import { CONTEXT_SCHEMA_VERSION } from '@impact/shared';
 
-const PORT = Number(process.env.PORT ?? 3000);
+import { loadConfig } from './config.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -37,7 +37,8 @@ export function createApp(): express.Express {
 // Only listen when run directly, so tests can import `createApp` without
 // binding a port.
 if (process.argv[1] !== undefined && import.meta.url.endsWith('index.ts')) {
-  createApp().listen(PORT, () => {
-    console.log(`[api] listening on http://localhost:${String(PORT)}`);
+  const config = loadConfig();
+  createApp().listen(config.port, () => {
+    console.log(`[api] listening on http://localhost:${String(config.port)}`);
   });
 }

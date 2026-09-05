@@ -330,10 +330,19 @@ export interface AnalysisChangedFunction {
   explanationId: ObjectIdString | null;
 }
 
+/**
+ * The analysis unit is a `(baseSha, headSha)` commit pair, not a PR (D9). A
+ * `pull_request` supplies `base.sha`/`head.sha` and sets `prNumber`; a `push` to
+ * the default branch supplies `before`/`after` and leaves `prNumber` unset.
+ */
+export type AnalysisTrigger = 'pull_request' | 'push';
+
 export interface AnalysisDoc {
   _id: ObjectIdString;
   repoId: ObjectIdString;
-  prNumber: number;
+  trigger: AnalysisTrigger;
+  /** Present only when `trigger === 'pull_request'` (D9). */
+  prNumber?: number;
   baseSha: Sha;
   headSha: Sha;
   baseGraphVersionId: ObjectIdString | null;

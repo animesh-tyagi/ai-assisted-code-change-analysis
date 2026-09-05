@@ -11,3 +11,4 @@ export * from './context.js';
 export * from './explanation.js';
 export * from './nodeKey.js';
 export * from './parserWire.js';
+export * from './queues.js';
