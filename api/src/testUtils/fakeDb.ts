@@ -53,6 +53,43 @@ function clone<T>(value: T): T {
   return { ...value };
 }
 
+function compareValues(a: unknown, b: unknown): number {
+  const av = a instanceof Date ? a.getTime() : a;
+  const bv = b instanceof Date ? b.getTime() : b;
+  if (typeof av === 'number' && typeof bv === 'number') return av - bv;
+  if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv);
+  return 0;
+}
+
+class FakeCursor {
+  constructor(private docs: Doc[]) {}
+
+  sort(spec: Record<string, 1 | -1>): this {
+    const [field, direction] = Object.entries(spec)[0] ?? [];
+    if (field === undefined) return this;
+    this.docs = [...this.docs].sort(
+      (a, b) => compareValues(a[field], b[field]) * (direction === -1 ? -1 : 1),
+    );
+    return this;
+  }
+
+  limit(n: number): this {
+    this.docs = this.docs.slice(0, n);
+    return this;
+  }
+
+  async next(): Promise<Doc | null> {
+    await Promise.resolve();
+    const first = this.docs.at(0);
+    return first === undefined ? null : clone(first);
+  }
+
+  async toArray(): Promise<Doc[]> {
+    await Promise.resolve();
+    return this.docs.map(clone);
+  }
+}
+
 class FakeCollection {
   private readonly docs = new Map<string, Doc>();
 
@@ -75,6 +112,10 @@ class FakeCollection {
       if (matches(doc, filter)) return clone(doc);
     }
     return null;
+  }
+
+  find(filter: Record<string, unknown>): FakeCursor {
+    return new FakeCursor([...this.docs.values()].filter((doc) => matches(doc, filter)));
   }
 
   async findOneAndUpdate(

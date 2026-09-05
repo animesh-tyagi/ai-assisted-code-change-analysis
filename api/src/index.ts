@@ -4,7 +4,8 @@
  * `POST /api/webhooks/github` — raw-body signature verify, delivery dedupe,
  * event switch, enqueue, 202 (ARCHITECTURE §9.1). **M6 Phase 2.**
  *
- * Still to come: `GET /api/analyses/:id` and the polling endpoints (§9.6). **M6 Phase 5.**
+ * `GET /api/analyses/:id` and `GET /api/repos/:repoId/pulls/:number/latest`
+ * — the §9.6 polling endpoints. **M6 Phase 5.**
  */
 
 import express from 'express';
@@ -16,6 +17,7 @@ import { CONTEXT_SCHEMA_VERSION } from '@impact/shared';
 import { loadConfig } from './config.js';
 import { connect } from './db/client.js';
 import { createQueues, type Queues } from './queues/producer.js';
+import { createAnalysesRouter } from './routes/analyses.js';
 import { createWebhooksRouter } from './routes/webhooks.js';
 
 export interface AppDeps {
@@ -43,6 +45,7 @@ export function createApp(deps: AppDeps): express.Express {
       webhookSecret: deps.webhookSecret,
     }),
   );
+  app.use('/api', createAnalysesRouter({ db: deps.db }));
 
   return app;
 }

@@ -1,10 +1,13 @@
 /**
  * Typed collection getters for the collections the API process touches
  * directly: `repos` and `installations` (webhook upserts, §9.1 step 4),
- * `webhookDeliveries` (the redelivery dedupe, §9.1 step 3), and `analyses`
+ * `webhookDeliveries` (the redelivery dedupe, §9.1 step 3), `analyses`
  * (creating/superseding analysis docs, §5.2 step 1, and the read endpoints,
- * §9.6). Everything graph-shaped (`functions`, `edges`, `surfaces`,
- * `graphVersions`) stays worker-only — the API never reads or writes it.
+ * §9.6), and `explanations` (read-only here — §9.6 embeds each changed
+ * function's prose in the analysis response rather than making the frontend
+ * do a second round-trip per function). Everything else graph-shaped
+ * (`functions`, `edges`, `surfaces`, `graphVersions`) stays worker-only — the
+ * API never reads or writes it.
  *
  * Deliberately a separate, smaller copy of `worker/src/db/collections.ts`
  * rather than a cross-package import: `api` and `worker` are independent
@@ -20,6 +23,7 @@ import { ObjectId } from 'mongodb';
 
 import type {
   AnalysisDoc,
+  ExplanationDoc,
   InstallationDoc,
   RepoDoc,
   WebhookDeliveryDoc,
@@ -37,6 +41,10 @@ export function installationsCollection(db: Db): Collection<MongoDoc<Installatio
 
 export function analysesCollection(db: Db): Collection<MongoDoc<AnalysisDoc>> {
   return db.collection('analyses');
+}
+
+export function explanationsCollection(db: Db): Collection<MongoDoc<ExplanationDoc>> {
+  return db.collection('explanations');
 }
 
 /** `_id` here is GitHub's delivery UUID (a string), not an `ObjectId`. */
