@@ -22,7 +22,7 @@ in the source text because Spring wires them at runtime:
 | Parser service | Spring Boot + JavaParser + JavaSymbolSolver |
 | Data | MongoDB (graph + results), Redis + BullMQ (jobs) |
 | Frontend | React, force-directed impact graph |
-| LLM | Google Gemini 2.5 Flash, behind an `LLMProvider` interface |
+| LLM | Google Gemini 3.6 Flash, behind an `LLMProvider` interface |
 
 v1 targets **Java Spring Boot repositories only**.
 

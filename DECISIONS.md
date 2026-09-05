@@ -202,6 +202,11 @@ to cross before this touches anyone else's private code.
 **Interview line:** "I benchmarked a free open model against a frontier model on my own rubric
 and chose on cost-versus-quality — and my correctness guard is model-independent, so going free
 cost me nothing in trust."
+**Update (M5):** `gemini-2.5-flash` stopped being served to new API keys shortly after
+this was written. The reasoning above (free tier, narrow-task-appropriate small model,
+provider-agnostic correctness guarantee) is otherwise unchanged — only the version pin
+moved; see "LLM model: gemini-2.5-flash deprecated, switched to gemini-3.6-flash (M5)"
+further down.
 
 
 ---
@@ -685,3 +690,39 @@ confidence is its *weakest* edge (`exact < single_impl < regex < ambiguous`), an
 first or last edge's confidence instead would let one exact hop mask an ambiguous one
 elsewhere on the same path, understating uncertainty exactly where the explanation needs
 to hedge.
+
+---
+
+## LLM model: gemini-2.5-flash deprecated, switched to gemini-3.6-flash (M5)
+
+**Context:** BUILD_PLAN Step 5's live verification (`npm run worker:explain` against the
+real Gemini API) failed on the first run: `gemini-2.5-flash` returned a 404, `"This model
+... is no longer available to new users. Please update your code to use
+models/gemini-3.6-flash."` The API key behind this project is new enough that it never
+had access to 2.5 in the first place — this isn't a mid-project deprecation of a model
+that was working, it's discovering the pin was already stale by the time M5 tried to call
+it live.
+
+**Chose:** `gemini-3.6-flash` as the new default `LLM_MODEL` (`.env`, `.env.example`,
+`worker/src/config.ts`'s fallback) and the model named throughout ARCHITECTURE.md,
+CLAUDE.md, README.md, and BUILD_PLAN.md.
+
+**Why this didn't touch any code beyond the default string:** `LLMProvider` (§11.2) and
+`GeminiProvider` never hardcode a model id — it's a config value threaded through
+`GeminiProviderConfig.model` from `WorkerConfig.llmModel`, read from `LLM_MODEL`. This is
+exactly what "swapping models must stay a config change" (§11.2, D2's `TypeSolver` seam
+applied to the LLM) was for — the fix was one changed default and a doc pass, not a code
+change, and the same seam is what will let M8 add a second provider without touching this
+one.
+
+**Consequence:** none of the reasoning in "LLM provider: Gemini ... Flash on the free
+tier" above changes — narrow grounded rewriting still doesn't need a frontier model, the
+validator's correctness guarantee is still model-independent, and the free tier's privacy
+tradeoff (may train on inputs) still applies to whichever Flash-tier model is current.
+The only thing volatile here is the specific version string, which is exactly why it lives
+in one config default and an env var rather than being repeated inline anywhere code
+makes a decision.
+
+**Roadmap note:** model names on a fast-moving free tier will keep going stale between
+"documented" and "actually callable." Nothing to build differently for this — the config
+seam already absorbs it — just worth remembering this will happen again before M8.

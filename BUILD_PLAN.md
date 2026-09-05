@@ -128,8 +128,10 @@ hundreds of nodes.
 
 ## Step 5 — LLM step + validator (plug in Gemini here)
 **Goal:** context object → three prose sections, mechanically grounded.
-- [ ] `LLMProvider` interface; `GeminiProvider` (Gemini 2.5 Flash, `@google/genai`, JSON
-      `responseSchema` for the fixed sections). No provider specifics leak past the interface.
+- [ ] `LLMProvider` interface; `GeminiProvider` (Gemini 3.6 Flash — supersedes the
+      originally-planned 2.5 Flash, deprecated for new API keys; see DECISIONS.md —
+      `@google/genai`, JSON `responseSchema` for the fixed sections). No provider
+      specifics leak past the interface.
 - [ ] The frozen prompt (instruction block + edge/confidence vocabulary + few-shots).
 - [ ] Post-generation validator (§11.3): symbol + numeric allowlist, extract candidates,
       reject on violation, one repair attempt, deterministic template fallback + `degraded`.

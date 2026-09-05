@@ -815,10 +815,11 @@ D2's TypeSolver, applied to the LLM). This also keeps the eval's cross-provider
 comparison a one-line switch. v1 implementation: `GeminiProvider` using
 `@google/genai`.
 
-- Model `gemini-2.5-flash` (free tier). This is bounded rewriting of a supplied
-  structure, not open-ended reasoning, so a small fast model is the right default;
-  move to a larger Gemini — or another provider behind the same interface — only
-  if eval scores say so.
+- Model `gemini-3.6-flash` (free tier; supersedes the originally-pinned
+  `gemini-2.5-flash`, deprecated for new API keys — see DECISIONS.md). This is
+  bounded rewriting of a supplied structure, not open-ended reasoning, so a small
+  fast model is the right default; move to a larger Gemini — or another provider
+  behind the same interface — only if eval scores say so.
 - **Structured outputs:** `responseMimeType: "application/json"` with a
   `responseSchema` whose properties are the fixed sections (§11.5), so a missing or
   extra claim is structurally visible. This is the load-bearing setting, and it

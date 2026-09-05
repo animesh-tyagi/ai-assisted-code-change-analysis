@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "repo": { "owner": "acme", "name": "billing", "prNumber": 412 },
+  "changedMethod": {
+    "key": "fn:com.acme.service.FooService#findById(java.lang.Long)",
+    "displayName": "FooService.findById(Long)",
+    "changeKind": "signature_changed",
+    "filePath": "src/main/java/com/acme/service/FooService.java",
+    "signatureDiff": {
+      "base": "public Foo findById(Long id)",
+      "head": "public Optional<Foo> findById(Long id)",
+      "returnTypeChanged": true,
+      "paramsChanged": false,
+      "throwsAdded": [],
+      "visibilityChanged": false
+    },
+    "sourceDiff": "@@ -41,7 +41,7 @@ public class FooService {\n-    public Foo findById(Long id) {\n-        return repository.findById(id).orElse(null);\n+    public Optional<Foo> findById(Long id) {\n+        return repository.findById(id);\n     }"
+  },
+  "affectedBy": {
+    "directCallers": [
+      {
+        "key": "fn:com.acme.web.FooController#get(java.lang.Long)",
+        "displayName": "FooController.get(Long)",
+        "hops": 1,
+        "callSite": { "filePath": "src/main/java/com/acme/web/FooController.java", "line": 28 },
+        "usage": "return value assigned and dereferenced",
+        "signatureCompatible": false,
+        "edgeConfidence": "exact",
+        "inferred": false
+      },
+      {
+        "key": "fn:com.acme.jobs.FooRefresher#refresh()",
+        "displayName": "FooRefresher.refresh()",
+        "hops": 1,
+        "callSite": { "filePath": "src/main/java/com/acme/jobs/FooRefresher.java", "line": 15 },
+        "usage": "calls this method",
+        "signatureCompatible": false,
+        "edgeConfidence": "exact",
+        "inferred": false
+      }
+    ],
+    "directCallerTotal": 2,
+    "directCallersTruncated": false,
+    "reachableSurfaces": {
+      "entrypoints": [
+        { "key": "route:GET /api/foos/{id}", "kind": "http_route", "minHops": 2, "viaInferredEdge": true },
+        { "key": "job:com.acme.billing.NightlyJob#run()", "kind": "scheduled_job", "minHops": 2, "viaInferredEdge": true }
+      ],
+      "data": [
+        { "key": "table:foo", "kind": "table", "access": "read", "viaInferredEdge": true, "confidence": "exact" }
+      ]
+    },
+    "traversal": { "maxDepth": 5, "depthCapHit": false, "nodesVisited": 6 }
+  },
+  "nowDependsOn": {
+    "callees": [
+      {
+        "key": "fn:com.acme.repo.FooRepository#findById(java.lang.Long)",
+        "displayName": "FooRepository.findById(Long)",
+        "isNew": false,
+        "edgeConfidence": "exact",
+        "inferred": false
+      }
+    ]
+  },
+  "changeHistory": {
+    "commits": [
+      {
+        "sha": "a1b2c3d",
+        "authorName": "Jordan Lee",
+        "authoredAt": "2026-07-14T10:32:00Z",
+        "subject": "Make findById null-safe by returning Optional",
+        "insertions": 6,
+        "deletions": 2
+      }
+    ],
+    "truncatedAtRename": false
+  },
+  "quality": {
+    "unresolvedRate": 0.052,
+    "ambiguousEdgesOnPath": 0,
+    "parseErrorsInTouchedFiles": 0
+  }
+}
