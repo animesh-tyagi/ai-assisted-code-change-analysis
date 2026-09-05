@@ -68,6 +68,14 @@ export async function processIndexJob(
   }
 }
 
+/**
+ * §9.2's "1 per repo" is enforced by the Redis lock inside
+ * `resolveGithubWorkspace`, not by this number — a *global* concurrency of 1
+ * would wrongly serialize indexing across different repos too. This is how
+ * many different repos can index in parallel.
+ */
+const INDEX_WORKER_CONCURRENCY = 5;
+
 export function createIndexWorker(deps: IndexJobDeps): BullWorker<IndexJobData> {
   return new Worker<IndexJobData>(
     QUEUE_NAMES.index,
@@ -76,6 +84,7 @@ export function createIndexWorker(deps: IndexJobDeps): BullWorker<IndexJobData> 
     },
     {
       connection: deps.redis,
+      concurrency: INDEX_WORKER_CONCURRENCY,
       settings: { backoffStrategy: fixedScheduleBackoff },
     },
   );

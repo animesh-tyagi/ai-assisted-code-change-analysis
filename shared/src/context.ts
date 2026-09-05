@@ -42,7 +42,8 @@ export interface ContextObject {
 export interface ContextRepo {
   owner: string;
   name: string;
-  prNumber: number;
+  /** `null` for a `push`-triggered analysis (D9) — there is no PR. */
+  prNumber: number | null;
 }
 
 // ---------------------------------------------------------------------------
