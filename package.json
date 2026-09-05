@@ -25,7 +25,8 @@
     "dev:infra:down": "docker compose down",
     "dev:api": "npm run dev --workspace @impact/api",
     "dev:worker": "npm run dev --workspace @impact/worker",
-    "worker:index": "tsx worker/src/index.ts"
+    "worker:index": "tsx worker/src/index.ts",
+    "worker:explain": "tsx --env-file=.env worker/src/llm/cli.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

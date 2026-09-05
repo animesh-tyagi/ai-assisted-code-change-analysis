@@ -68,5 +68,14 @@ export async function ensureIndexes(db: Db): Promise<void> {
         { graphVersionId: 1, from: 1, to: 1, type: 1 },
         { unique: true, name: 'graphVersionId_from_to_type' },
       ),
+
+    // The `explanations` cache (§11.2 D-cache) — identical context object, prompt
+    // version, and model never pays for a second generation.
+    db
+      .collection('explanations')
+      .createIndex(
+        { contextHash: 1, promptVersion: 1, model: 1 },
+        { unique: true, name: 'contextHash_promptVersion_model' },
+      ),
   ]);
 }

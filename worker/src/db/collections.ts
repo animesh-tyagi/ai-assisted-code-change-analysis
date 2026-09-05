@@ -1,6 +1,7 @@
 /**
- * Typed collection getters for the six §7 collections this milestone owns:
- * `repos`, `graphVersions`, `functions`, `functionVersions`, `surfaces`, `edges`.
+ * Typed collection getters for the §7 collections the worker owns:
+ * `repos`, `graphVersions`, `functions`, `functionVersions`, `surfaces`, `edges`
+ * (M3), and `explanations` (M5 — the `explanations` cache, §11.2 D-cache).
  *
  * `_id` is declared `ObjectIdString` in `@impact/shared` (a hex string at the
  * application boundary — ARCHITECTURE §7), but the Mongo driver's own document
@@ -16,6 +17,7 @@ import { ObjectId } from 'mongodb';
 
 import type {
   EdgeDoc,
+  ExplanationDoc,
   FunctionDoc,
   FunctionVersionDoc,
   GraphVersionDoc,
@@ -49,6 +51,10 @@ export function surfacesCollection(db: Db): Collection<MongoDoc<SurfaceDoc>> {
 
 export function edgesCollection(db: Db): Collection<MongoDoc<EdgeDoc>> {
   return db.collection('edges');
+}
+
+export function explanationsCollection(db: Db): Collection<MongoDoc<ExplanationDoc>> {
+  return db.collection('explanations');
 }
 
 /** Convenience re-export so callers don't need a separate `mongodb` import just for this. */

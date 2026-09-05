@@ -15,7 +15,7 @@ repos only**.
 - **Parser service:** a separate **Spring Boot** app using **JavaParser + JavaSymbolSolver**.
 - **Data:** MongoDB (graph + results), Redis + BullMQ (jobs).
 - **Frontend:** React, with a force-directed impact graph.
-- **LLM:** Google **Gemini 2.5 Flash** (free tier), behind an `LLMProvider` interface.
+- **LLM:** Google **Gemini 3.6 Flash** (free tier), behind an `LLMProvider` interface.
 
 ## Non-negotiable rules (do not violate without an explicit decision)
 1. **The graph decides what is true. The LLM only phrases it.** The model gets one
