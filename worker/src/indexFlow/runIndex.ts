@@ -41,6 +41,13 @@ export interface RunIndexInput {
   name: string;
   defaultBranch: string;
   includeTestSources: boolean;
+  /**
+   * Skip `resolveRepo` and use this repoId directly — set when the repo
+   * already exists (M6: a `provider: 'github'` repo the webhook already
+   * created). Omitted, `resolveRepo`'s `provider: 'local'` find-or-create
+   * runs as before (the M3 CLI trigger's behavior, unchanged).
+   */
+  repoId?: ObjectIdString;
 }
 
 export interface RunIndexResult {
@@ -56,11 +63,14 @@ export async function runIndex(
   config: WorkerConfig,
   input: RunIndexInput,
 ): Promise<RunIndexResult> {
-  const { repoId } = await resolveRepo(db, {
-    owner: input.owner,
-    name: input.name,
-    defaultBranch: input.defaultBranch,
-  });
+  const { repoId } =
+    input.repoId !== undefined
+      ? { repoId: input.repoId }
+      : await resolveRepo(db, {
+          owner: input.owner,
+          name: input.name,
+          defaultBranch: input.defaultBranch,
+        });
 
   // Fail fast, before any git or Mongo write, if the parser is unreachable.
   const version = await getVersion(config.parserUrl);

@@ -8,6 +8,11 @@ export default defineConfig([
     '**/dist/**',
     '**/node_modules/**',
     '**/coverage/**',
+    // Worker workspace scratch space (cache clones, worktrees) — real repo
+    // content checked out at runtime, not project source. Found live (M6
+    // phase 6 field-testing): a real GitHub repo's own stray .js file under
+    // worker/data/work/... got swept into a project-wide lint run.
+    '**/data/**',
     // Owned by other toolchains / later milestones.
     'parser/**',
     'web/**',

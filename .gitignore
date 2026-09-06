@@ -18,8 +18,13 @@ target/
 coverage/
 .vitest/
 
-# Local workspaces used by the worker (ARCHITECTURE §4)
-/data/
+# Local workspaces used by the worker (ARCHITECTURE §4). Not anchored to the
+# repo root: WORKSPACE_ROOT="./data" resolves relative to whatever directory
+# actually started the worker process, which is worker/ when run via
+# `npm run dev --workspace @impact/worker` (root-relative only when invoked
+# directly via `tsx worker/src/index.ts`) — so this needs to match `data/`
+# at any depth, not just at the root.
+data/
 
 # Editors
 .vscode/

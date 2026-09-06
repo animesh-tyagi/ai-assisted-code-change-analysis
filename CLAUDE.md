@@ -73,6 +73,8 @@ npm test               # vitest run  (npm run test:watch to watch)
 npm run lint           # eslint
 npm run format         # prettier (code only — *.md is ignored on purpose)
 npm run dev:api        # tsx watch; GET http://localhost:3000/healthz
+npm run dev:worker     # the long-running index/analyze BullMQ Workers (M6)
+npm run dev:webhook-relay  # smee.io -> localhost relay, dev only (M6)
 ```
 Copy `.env.example` → `.env` before running anything that needs credentials.
 
@@ -132,5 +134,30 @@ indexed this way (pre-M6, no GitHub App yet) gets `provider: 'local'` and a
 synthesized `githubRepoId` — see DECISIONS.md, "Local repos before the GitHub App
 exists (M3)". Re-running the same `--sha` is safe (replaces that graph version rather
 than colliding with it) — useful for iterating on the index flow itself.
+
+Webhook + queue orchestration (M6) — a push or PR now flows end-to-end from GitHub to a
+stored, pollable explanation with no manual command. One-time setup, done outside this repo
+(Claude Code cannot do these — they need a GitHub account and browser):
+1. Register a GitHub App (github.com → Settings → Developer settings → GitHub Apps → New).
+   Permissions: Contents (read), Metadata (read), Pull requests (read). Subscribe to `push`,
+   `pull_request`, `installation`, `installation_repositories`. Generate a private key.
+2. Get a channel at https://smee.io ("Start a new channel"); set it as the App's own
+   webhook URL; put it in `.env` as `SMEE_URL`.
+3. Install the App on the repos to test against. A GitHub App can only be installed on a
+   repo you administer — `spring-petclinic-rest` isn't yours, so PR-trigger testing needs
+   **your own fork** of it, with the App installed there.
+4. Fill `.env`'s `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_WEBHOOK_SECRET` from
+   the App's own settings page.
+
+Then, three processes plus infra, each in its own terminal:
+```bash
+npm run dev:infra          # Mongo + Redis
+npm run dev:api            # webhook receiver + read endpoints, :3000
+npm run dev:worker         # index/analyze BullMQ Workers
+npm run dev:webhook-relay  # forwards the smee.io channel to :3000
+```
+Push a commit to a repo the App is installed on, or open/update a PR on your
+`spring-petclinic-rest` fork, and watch `GET /api/analyses/:id` (or the `analyses`
+collection directly) move `queued → cloning → parsing → traversing → explaining → ready`.
 
 _Frontend commands land with M7._
