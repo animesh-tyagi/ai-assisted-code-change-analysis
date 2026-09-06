@@ -23,6 +23,9 @@ function fakeQueue<T>(sink: RecordedJob<T>[]): Queue<T> {
       sink.push({ jobId: opts?.jobId ?? '', data });
       return {};
     },
+    // No prior job history in a fresh fake — `enqueueIndexJob`/`enqueueAnalyzeJob`'s
+    // `ensureFreshJobSlot` check always sees "nothing to clean up" here.
+    getJob: async () => Promise.resolve(undefined),
     close: async () => Promise.resolve(),
   } as unknown as Queue<T>;
 }

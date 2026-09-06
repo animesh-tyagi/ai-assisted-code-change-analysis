@@ -7,6 +7,17 @@
  * (§9.3: 5s → 30s → 2m) is a `backoffStrategy` function registered where the
  * `Worker` is constructed (Phase 3), not here; a producer only needs to name
  * which strategy a job opts into.
+ *
+ * `ensureFreshJobSlot`: BullMQ's job-id dedupe treats `completed` as terminal
+ * the same as `failed` — `queue.add()` with an id that already completed
+ * silently no-ops rather than re-running. That's usually right (§9.2's whole
+ * point), but D3's retention can later delete a completed index job's own
+ * `graphVersions` row (a later index of a different SHA becoming current
+ * prunes it as superseded), leaving nothing to redo the no-longer-accurate
+ * work under that same id. See the fuller note on the identical helper in
+ * `worker/src/queues/producer.ts` — kept duplicated rather than shared across
+ * the `api`/`worker` process boundary, matching this file's own established
+ * pattern.
  */
 
 import { Queue } from 'bullmq';
@@ -45,11 +56,25 @@ const DEFAULT_JOB_OPTS = {
   removeOnFail: { age: 30 * 24 * 60 * 60 },
 };
 
+/** Terminal states in BullMQ's own sense — anything else (waiting/active/delayed) is left alone. */
+async function ensureFreshJobSlot(
+  queue: Queue<IndexJobData> | Queue<AnalyzeJobData>,
+  jobId: string,
+): Promise<void> {
+  const existing = await queue.getJob(jobId);
+  if (existing === undefined) return;
+  const state = await existing.getState();
+  if (state === 'completed' || state === 'failed') {
+    await existing.remove();
+  }
+}
+
 export async function enqueueIndexJob(
   queues: Queues,
   jobId: string,
   data: IndexJobData,
 ): Promise<void> {
+  await ensureFreshJobSlot(queues.index, jobId);
   await queues.index.add(QUEUE_NAMES.index, data, { ...DEFAULT_JOB_OPTS, jobId });
 }
 
@@ -58,5 +83,6 @@ export async function enqueueAnalyzeJob(
   jobId: string,
   data: AnalyzeJobData,
 ): Promise<void> {
+  await ensureFreshJobSlot(queues.analyze, jobId);
   await queues.analyze.add(QUEUE_NAMES.analyze, data, { ...DEFAULT_JOB_OPTS, jobId });
 }

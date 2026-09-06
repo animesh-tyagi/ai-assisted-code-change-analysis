@@ -18,6 +18,7 @@ import { analyzeJobId, indexJobId, type ObjectIdString } from '@impact/shared';
 import { installationsCollection } from '../db/collections.js';
 import {
   createOrGetAnalysis,
+  markAnalysisFailed,
   supersedePriorPullRequestAnalyses,
   supersedePriorPushAnalyses,
 } from '../github/analyses.js';
@@ -142,6 +143,31 @@ async function handleWebhook(
     .json({ deliveryId, ...(analysisId !== undefined ? { analysisId } : {}) });
 }
 
+/**
+ * Enqueues the analyze job for an already-created `analyses` doc. If the
+ * enqueue itself throws, the doc is marked `failed` rather than left stuck at
+ * `queued` with no job behind it, then the error is rethrown so the outer
+ * handler still 500s (a transient Redis blip should still make GitHub retry
+ * the delivery — see `handleWebhook`'s catch-all).
+ */
+async function enqueueAnalyzeJobOrMarkFailed(
+  deps: WebhooksRouterDeps,
+  jobId: string,
+  analysisId: ObjectIdString,
+): Promise<void> {
+  try {
+    await enqueueAnalyzeJob(deps.queues, jobId, { analysisId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await markAnalysisFailed(
+      deps.db,
+      analysisId,
+      `failed to enqueue analyze job: ${message}`,
+    );
+    throw err;
+  }
+}
+
 async function resolveInstallationId(
   db: Db,
   githubInstallationId: number | undefined,
@@ -208,7 +234,7 @@ async function handlePushEvent(
     deliveryId,
     jobId,
   });
-  await enqueueAnalyzeJob(deps.queues, jobId, { analysisId });
+  await enqueueAnalyzeJobOrMarkFailed(deps, jobId, analysisId);
   return analysisId;
 }
 
@@ -240,6 +266,6 @@ async function handlePullRequestEvent(
     deliveryId,
     jobId,
   });
-  await enqueueAnalyzeJob(deps.queues, jobId, { analysisId });
+  await enqueueAnalyzeJobOrMarkFailed(deps, jobId, analysisId);
   return analysisId;
 }

@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { ObjectId } from 'mongodb';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -189,13 +191,11 @@ async function buildFixture(overrides: Partial<RunAnalyzeInput> = {}): Promise<F
     llmProvider: fakeLLMProvider(),
     explanationStore: new InMemoryExplanationStore(),
     postParseFn: vi.fn().mockResolvedValue(subsetParseResponse(headSha, 'hash-head')),
-    getVersionFn: vi
-      .fn()
-      .mockResolvedValue({
-        parserVersion: '1.0.0',
-        ruleVersion: '1',
-        javaParserVersion: '3.x',
-      }),
+    getVersionFn: vi.fn().mockResolvedValue({
+      parserVersion: '1.0.0',
+      ruleVersion: '1',
+      javaParserVersion: '3.x',
+    }),
     addWorktreeFn: vi.fn().mockResolvedValue(undefined),
     removeWorktreeFn: vi.fn().mockResolvedValue(undefined),
     diffNameStatusFn: vi.fn().mockResolvedValue(['Foo.java']),
@@ -239,6 +239,26 @@ describe('runAnalyze', () => {
     expect(graphVersions).toHaveLength(1); // only the base graphVersion remains
 
     expect(deps.removeWorktreeFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses an absolute workspace path, not a relative-string join', async () => {
+    // Regression guard: the parser is a *separate process*. A relative path
+    // (e.g. `${workspaceRoot}/work/...` built by string concatenation)
+    // resolves against whichever directory happened to start the parser,
+    // not this one — the parser then 404s with "workspacePath does not
+    // exist" (found live, M6 phase 6 field-testing).
+    const { input, deps } = await buildFixture();
+
+    await runAnalyze(deps, input);
+
+    const [, , workDirArg] = (deps.addWorktreeFn as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, string, string];
+    expect(path.isAbsolute(workDirArg)).toBe(true);
+
+    const [, parseRequest] = (deps.postParseFn as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [string, { workspacePath: string }];
+    expect(path.isAbsolute(parseRequest.workspacePath)).toBe(true);
+    expect(parseRequest.workspacePath).toBe(workDirArg);
   });
 
   it('pins the base graph for the duration of the run', async () => {

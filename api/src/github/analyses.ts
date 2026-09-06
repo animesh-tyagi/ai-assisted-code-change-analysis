@@ -98,3 +98,21 @@ export async function createOrGetAnalysis(
     throw err;
   }
 }
+
+/**
+ * Marks an `analyses` doc failed directly from the webhook handler — used
+ * when `enqueueAnalyzeJob` throws *after* `createOrGetAnalysis` already
+ * succeeded, so the doc doesn't sit silently orphaned at `queued` forever
+ * with no BullMQ job behind it (found the hard way, M6 phase 6 field-testing:
+ * a bad job-id format made exactly this happen).
+ */
+export async function markAnalysisFailed(
+  db: Db,
+  analysisId: ObjectIdString,
+  error: string,
+): Promise<void> {
+  await analysesCollection(db).updateOne(
+    { _id: new ObjectId(analysisId) },
+    { $set: { status: 'failed', error, updatedAt: new Date() } },
+  );
+}

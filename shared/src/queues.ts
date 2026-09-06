@@ -30,18 +30,29 @@ export function indexJobId(repoId: ObjectIdString, sha: Sha): string {
 }
 
 /**
- * `analyze:{repoId}:{pr|push}:{headSha}` — one in-flight analysis per
+ * `analyze:{repoId}:{pr|push}-{headSha}` — one in-flight analysis per
  * `(repo, unit, headSha)`. `unit` is the PR number for a `pull_request`
  * trigger, or the literal `push` for a push-to-default-branch trigger (D9) —
  * a repo has only one active push-analysis stream, so `push` alone
  * disambiguates it from any PR unit on the same repo.
+ *
+ * `unit` and `headSha` are hyphen-joined, not a third `:`-segment: BullMQ
+ * rejects any custom `jobId` containing `:` unless it splits into *exactly*
+ * three parts (a backward-compat quirk for its own old repeatable-job id
+ * format — see `Job.validateOptions` in `bullmq`). `index:{repoId}:{sha}`
+ * above already lands on exactly three, but a fourth `:`-segment here would
+ * throw `Error: Custom Id cannot contain :` at `queues.analyze.add()` time —
+ * caught the hard way (M6 phase 6 field-testing): the webhook received the
+ * push and wrote the `analyses` doc, but silently never enqueued a job for
+ * it, because `handlePushEvent`'s call to `enqueueAnalyzeJob` threw *after*
+ * `createOrGetAnalysis` had already succeeded.
  */
 export function analyzeJobId(
   repoId: ObjectIdString,
   unit: number | 'push',
   headSha: Sha,
 ): string {
-  return `analyze:${repoId}:${String(unit)}:${headSha}`;
+  return `analyze:${repoId}:${String(unit)}-${headSha}`;
 }
 
 export interface IndexJobData {

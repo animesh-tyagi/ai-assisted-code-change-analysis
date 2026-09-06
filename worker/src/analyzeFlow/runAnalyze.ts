@@ -16,6 +16,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import type { Db } from 'mongodb';
 
@@ -146,7 +147,14 @@ export async function runAnalyze(
       }
     }
 
-    headWorkDir = `${deps.config.workspaceRoot}/work/${repoId}/${headSha}`;
+    // Absolute, not a relative-string join: this path is also sent to the
+    // parser in the POST /v1/parse body (§8's `workspacePath`), and the
+    // parser is a *separate process* with its own cwd — a relative path
+    // resolves against whatever directory happened to start that process,
+    // not this one. Found live (M6 phase 6 field-testing) as a `404
+    // workspacePath does not exist` from the parser, matching `runIndex.ts`'s
+    // own `path.resolve()` for exactly this reason.
+    headWorkDir = path.resolve(deps.config.workspaceRoot, 'work', repoId, headSha);
     await addWorktreeFn(input.workspace.repoPath, headSha, headWorkDir);
 
     // Step 5 — changed files, mode: "subset" parse.
